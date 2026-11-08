@@ -136,6 +136,7 @@ Respect system “remove animations”: replace transitions with instant state, 
 - **Trigger:** idle delay from Settings (Off / 1 / 2 / 5 / 10 / 20 min). Timer resets on every key/touch and only runs while Astra is in front — never over a playing app.
 - **Layers:** wallpaper (photo slideshow or procedural aurora) → 35% scrim → wordmark, 104 sp thin clock, date; “Press any key to return” at the bottom.
 - **Home backdrop:** the same wallpaper source, static — one photo at 70% opacity under a vertical scrim (0x7A→0xB8) so row headers and the top bar keep contrast; the aurora glow when there are no photos.
+- **Home photo picker:** Settings → Home photo, 4-up thumbnail grid, OK pins a MediaStore id (`home_photo_id`); the screensaver keeps cycling every photo. Missing file falls back to the first image.
 - **Motion:** 700 ms fade in, ~46 s aurora drift, 22 s photo hold with 2.6 s cross-fade and 5% slow zoom. No motion that blocks input.
 - **Exit:** any key or tap, 260 ms fade out, focus restored to where the user left it.
 - **Wallpaper sources:** `Pictures/Astra` or `DCIM/Astra`, queried through MediaStore (path access is blocked by scoped storage); `READ_MEDIA_IMAGES` requested on demand; built-in aurora when no photos are indexed.

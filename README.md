@@ -63,6 +63,10 @@ Screensaver and settings:
 |---|---|---|---|
 | ![](docs/screenshots/18-saver-aurora.png) | ![](docs/screenshots/19-saver-black.png) | ![](docs/screenshots/20-settings.png) | ![](docs/screenshots/21-saver-photos.png) |
 
+| Home photo picker |
+|---|
+| ![](docs/screenshots/23-home-photo-picker.png) |
+
 The same photo source backs the launcher itself:
 
 | Home with a photo wallpaper |
@@ -93,11 +97,13 @@ Before/after:
 - **Idle screensaver** after a configurable delay (Off / 1 / 2 / 5 / 10 / 20 min): a thin clock and date over a
   photo slideshow or a procedural ice-blue aurora, with a pure-black OLED mode. Any key or tap returns and
   restores focus. Timers only run while Astra is in front, so it never interrupts a playing app.
-- **Photo wallpaper** — the same setting drives the launcher backdrop *and* the screensaver: a static, dimmed
-  scenic photo behind the rows, or the procedural ice-blue aurora. Images are read from
+- **Photo wallpaper** — the same source drives the launcher backdrop *and* the screensaver: a static, dimmed
+  scenic photo behind the rows (choose it with Settings → Home photo, a D-pad thumbnail grid; defaults to the
+  first file), or the procedural ice-blue aurora. Images are read from
   `Pictures/Astra` (or `DCIM/Astra`) through MediaStore, downscaled to 1280 px, capped at 10; the aurora is the
   fallback when the folder is empty or unreadable.
-- **Astra Settings** — home card on/off, screensaver timeout and style, 12/24-hour clock, wallpaper source, preview, reset.
+- **Astra Settings** — home photo picker, home card on/off, screensaver timeout and style, 12/24-hour clock,
+  wallpaper source, preview, reset.
 - Quick panel opens on `Back` from Home (or the `≡` button) and restores focus when closed.
 - Search overlay with live filtering, a designed empty state, and launch on Enter.
 - `FLAG_KEEP_SCREEN_ON` while the launcher is visible.
