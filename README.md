@@ -73,6 +73,9 @@ Before/after:
 - Quick panel opens on `Back` from Home (or the `≡` button) and restores focus when closed.
 - Search overlay with live filtering, launches on Enter.
 - `FLAG_KEEP_SCREEN_ON` while the launcher is visible.
+- **Sleep** turns the display off via `DevicePolicyManager.lockNow()` — one-time device-admin activation,
+  no root. **Power** opens a Reboot / Shut down / System settings dialog; reboot and shutdown run through
+  `su` and report honestly when root is unavailable.
 
 ## How it works
 
@@ -86,6 +89,8 @@ APK ~50 KB and startup instant.
 | App grid | 7 tiles per row, weight-based, inside a `ScrollView` (no `GridView` focus quirks) |
 | Focus | Framework focus traversal + `OnFocusChangeListener` that swaps a rounded `GradientDrawable` and animates scale |
 | Quick panel | `FrameLayout` overlay: scrim + right sheet, `translationX` animation |
+| Sleep | `DevicePolicyManager.lockNow()` with a minimal `force-lock` device admin |
+| Power | dialog → `su 0 sh -c reboot` / `reboot -p`, system-settings fallback |
 | Search | `EditText` + `ListView` with a filtering inner adapter |
 | Background | Custom `Drawable` painting a near-black fill plus one radial ice-blue glow |
 
@@ -214,6 +219,9 @@ AstraLauncher/
 ## Known limitations
 
 - Media detection is package-name based (`isMedia`) — good enough for this box, not universal.
+- Sleep needs a one-time device-admin activation; it is inert while `stay_on_while_plugged_in` is non-zero.
+- Reboot/shut down need a usable `su` for the app UID. On the reference box `/system/xbin/su` is
+  `root:shell 4750`, so app-initiated root fails and the dialog falls back to system settings.
 - Home rows are not user-reorderable yet; pinned order is a constant.
 - Quick panel exposes system settings intents, which vary by OEM.
 - Disabling Google TV Launcher also removes its search/shop surfaces; revert if you want them back.

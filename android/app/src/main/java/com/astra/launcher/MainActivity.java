@@ -1,6 +1,8 @@
 package com.astra.launcher;
 
 import android.app.Activity;
+import android.app.Dialog;
+import android.app.admin.DevicePolicyManager;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Context;
@@ -18,6 +20,7 @@ import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -32,6 +35,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
+import android.view.Window;
 import android.view.WindowManager;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.BaseAdapter;
@@ -776,7 +780,7 @@ public class MainActivity extends Activity {
         panel.addView(profile);
 
         panel.addView(panelRow("Wi-Fi", "Connected · 5 GHz", intentAction(Settings.ACTION_WIFI_SETTINGS)));
-        panel.addView(panelRow("Ethernet", "Not connected", null));
+        panel.addView(panelRow("Ethernet", "Not connected", (Intent) null));
         panel.addView(panelRow("Date & time", new SimpleDateFormat("EEE d MMM · HH:mm", Locale.getDefault()).format(new Date()), intentAction(Settings.ACTION_DATE_SETTINGS)));
         panel.addView(divider());
         panel.addView(panelRow("HDMI input", "Switch source", intentAction("android.settings.TV_INPUT_SETTINGS")));
@@ -786,11 +790,19 @@ public class MainActivity extends Activity {
         panel.addView(divider());
         panel.addView(panelRow("Launcher settings", "Astra", null));
         panel.addView(panelRow("System settings", "Android TV", intentAction(Settings.ACTION_SETTINGS)));
-        panel.addView(panelRow("Sleep", "Turn display off", null));
-        panel.addView(panelRow("Power", "Restart or shut down", null));
+        panel.addView(panelActionRow("Sleep", "Turn display off", this::sleepDevice));
+        panel.addView(panelActionRow("Power", "Restart or shut down", this::showPowerDialog));
     }
 
     private View panelRow(String label, String value, final Intent intent) {
+        if (intent == null) return panelActionRow(label, value, null);
+        return panelActionRow(label, value, () -> {
+            try { startActivity(intent); }
+            catch (ActivityNotFoundException ex) { toast("Not available"); }
+        });
+    }
+
+    private View panelActionRow(String label, String value, final Runnable action) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -812,14 +824,173 @@ public class MainActivity extends Activity {
 
         row.setOnFocusChangeListener((view, f) -> applyFocus(view, f, 12));
         row.setOnClickListener(view -> {
-            if (intent != null) {
-                try { startActivity(intent); }
-                catch (ActivityNotFoundException ex) { toast("Not available"); }
+            if (action != null) {
+                action.run();
             } else {
                 toast(label);
             }
         });
         return row;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Power actions                                                      */
+    /* ------------------------------------------------------------------ */
+    private static final ComponentName ADMIN_COMPONENT =
+            new ComponentName("com.astra.launcher", "com.astra.launcher.AstraAdmin");
+
+    private void sleepDevice() {
+        DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(DEVICE_POLICY_SERVICE);
+        if (dpm == null) { toast("Sleep unavailable"); return; }
+        if (!dpm.isAdminActive(ADMIN_COMPONENT)) { showAdminPrompt(); return; }
+        try {
+            dpm.lockNow();
+        } catch (SecurityException ex) {
+            toast("Sleep unavailable");
+        }
+    }
+
+    private void showAdminPrompt() {
+        final Dialog dlg = new Dialog(this);
+        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(shaped(RAISED, LINE, 2));
+        card.setPadding(dp(26), dp(24), dp(26), dp(20));
+        card.addView(text("Enable sleep", 24, TX, Typeface.BOLD));
+
+        TextView sub = text("Astra needs device-admin access to turn the screen off. It uses only the screen-lock policy.", 13, TX2, Typeface.NORMAL);
+        LinearLayout.LayoutParams slp = wrap();
+        slp.topMargin = dp(8);
+        card.addView(sub, slp);
+
+        TextView activate = dialogButton("Activate", true);
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
+        alp.topMargin = dp(18);
+        activate.setOnClickListener(v -> {
+            dlg.dismiss();
+            openAdminSettings();
+        });
+        card.addView(activate, alp);
+
+        TextView cancel = dialogButton("Cancel", false);
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
+        clp.topMargin = dp(10);
+        cancel.setOnClickListener(v -> dlg.dismiss());
+        card.addView(cancel, clp);
+
+        presentDialog(dlg, card, cancel);
+    }
+
+    private void openAdminSettings() {
+        Intent i = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
+        i.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, ADMIN_COMPONENT);
+        i.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                "Astra uses device admin only to turn the screen off.");
+        try { startActivity(i); }
+        catch (ActivityNotFoundException ex) { toast("No device admin support"); }
+    }
+
+    private void showPowerDialog() {
+        final Dialog dlg = new Dialog(this);
+        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(shaped(RAISED, LINE, 2));
+        card.setPadding(dp(26), dp(24), dp(26), dp(20));
+
+        card.addView(text("Power", 24, TX, Typeface.BOLD));
+        TextView sub = text("Reboot and shut down need root on this device.", 13, TX2, Typeface.NORMAL);
+        LinearLayout.LayoutParams slp = wrap();
+        slp.topMargin = dp(6);
+        card.addView(sub, slp);
+
+        TextView reboot = dialogButton("Reboot", false);
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
+        blp.topMargin = dp(18);
+        reboot.setOnClickListener(v -> {
+            dlg.dismiss();
+            runRoot("reboot", "Reboot needs root");
+        });
+        card.addView(reboot, blp);
+
+        TextView off = dialogButton("Shut down", false);
+        LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
+        olp.topMargin = dp(10);
+        off.setOnClickListener(v -> {
+            dlg.dismiss();
+            runRoot("reboot -p", "Shut down needs root");
+        });
+        card.addView(off, olp);
+
+        TextView settings = dialogButton("System settings", false);
+        LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
+        glp.topMargin = dp(10);
+        settings.setOnClickListener(v -> {
+            dlg.dismiss();
+            try { startActivity(new Intent(Settings.ACTION_DEVICE_INFO_SETTINGS)); }
+            catch (ActivityNotFoundException ex) { toast("Not available"); }
+        });
+        card.addView(settings, glp);
+
+        TextView cancel = dialogButton("Cancel", true);
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
+        clp.topMargin = dp(18);
+        cancel.setOnClickListener(v -> dlg.dismiss());
+        card.addView(cancel, clp);
+
+        presentDialog(dlg, card, cancel);
+    }
+
+    private void presentDialog(Dialog dlg, LinearLayout card, View focus) {
+        dlg.setContentView(card);
+        Window w = dlg.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            w.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            WindowManager.LayoutParams lp = w.getAttributes();
+            lp.dimAmount = 0.65f;
+            w.setAttributes(lp);
+        }
+        dlg.show();
+        if (w != null) w.setLayout(dp(400), WindowManager.LayoutParams.WRAP_CONTENT);
+        focus.post(focus::requestFocus);
+    }
+
+    private TextView dialogButton(String label, boolean primary) {
+        TextView t = text(label, 16, primary ? ACCENT : TX, primary ? Typeface.BOLD : Typeface.NORMAL);
+        t.setGravity(Gravity.CENTER);
+        t.setBackground(rounded(primary ? ACCENT_SOFT : CARD, 14,
+                primary ? 0x667CC4FF : LINE, 1));
+        t.setFocusable(true);
+        t.setOnFocusChangeListener((v, f) -> applyFocus(v, f, 14));
+        return t;
+    }
+
+    private void runRoot(final String command, final String failMessage) {
+        new Thread(() -> {
+            boolean ok = false;
+            String[] suCandidates = {"/system/xbin/su", "/system/bin/su", "su"};
+            for (String su : suCandidates) {
+                try {
+                    Process p = Runtime.getRuntime().exec(
+                            new String[]{su, "0", "sh", "-c", command});
+                    ok = p.waitFor() == 0;
+                    break;
+                } catch (Exception ignored) {
+                    ok = false;
+                }
+            }
+            if (!ok) runOnUiThread(() -> toast(failMessage));
+        }, "astra-root").start();
     }
 
     private View divider() {
