@@ -82,7 +82,7 @@ Respect system “remove animations”: replace transitions with instant state, 
 ## 4. Screen specs
 
 ### Home
-- **Top bar (h 72):** wordmark left; right: clock, network glyph, Search, Quick Panel. Auto-hide after 8s idle; any D-pad reveals.
+- **Top bar (h 72):** wordmark left; right: clock, live system strip (`Wi-Fi ↓2.7 Mb/s · CPU 13% · RAM 0.6/1.5G · 174M free`), Search, Quick Panel. The strip samples every 3 s and stops while the screensaver is up. Auto-hide after 8s idle; any D-pad reveals.
 - **Hero:** optional quick-start card for the first media app, action copy “Open” — never claims to resume a title that the launcher cannot actually resume. If no media app exists, collapse the hero entirely (no placeholder art).
 - **Pinned row:** user-pinned apps persisted in `SharedPreferences` (`astra` / `pins`), 7–9 items, initial focus target; rows scroll horizontally so the focused tile is never clipped.
 - **Streaming row:** Leanback apps from PackageManager, 220×132 cards.

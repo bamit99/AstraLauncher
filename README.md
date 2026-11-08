@@ -50,7 +50,7 @@ tasks. Astra is the opposite — an explicit, honest surface:
 | ![](docs/screenshots/03-concept-quick-panel.jpg) | ![](docs/screenshots/09-prototype-panel.png) | ![](docs/screenshots/16-device-panel-network.png) |
 | ![](docs/screenshots/04-concept-search.jpg) | ![](docs/screenshots/08-prototype-search.png) | ![](docs/screenshots/12-device-search.png) |
 
-- **Home** — pinned row, streaming/media row and a tools row, with the clock, live network status, search and panel in the top bar. The quick-start card is opt-in (Settings → Home card, default off) because the pinned row already covers launch targets. Rows always end on a gap, never through a card.
+- **Home** — pinned row, streaming/media row and a tools row, with a live system strip (throughput, CPU, RAM, free storage), clock, search and panel in the top bar. The quick-start card is opt-in (Settings → Home card, default off) because the pinned row already covers launch targets. Rows always end on a gap, never through a card.
 - **Apps** — category chips (All / Media / Tools / System), 7-column grid of every launchable app, long-press for a context menu (Open / Pin / Unpin / App info).
 - **Quick panel** — right sheet with live network and Ethernet state, date/time, HDMI, display, sound, storage, refresh app list, Astra settings, screensaver, sleep and power. Every row closes the panel when it acts.
 - **Search** — filters installed apps as you type, launches them, and shows an empty state when nothing matches.
@@ -93,7 +93,9 @@ Before/after:
 - Real app icons, rendered at 38 dp inside rounded containers.
 - D-pad focus ring (2 px accent + 1.03 scale + elevation), D-pad focus restore after a context menu or
   screen rebuild, rows scroll horizontally to keep the focused tile in view.
-- Live connection status in the top bar and Quick Panel (`ConnectivityManager` / `NetworkCapabilities`).
+- **System strip in the top bar** — transport and throughput (`TrafficStats` deltas), CPU load (`/proc/stat`), available/total RAM
+  (`ActivityManager.MemoryInfo`) and free data storage (`StatFs`), refreshed every 3 s; each value degrades to `—` if the
+  kernel or provider refuses. Connection type also appears in the Quick Panel (`ConnectivityManager`).
 - **Idle screensaver** after a configurable delay (Off / 1 / 2 / 5 / 10 / 20 min): a thin clock and date over a
   photo slideshow or a procedural ice-blue aurora, with a pure-black OLED mode. Any key or tap returns and
   restores focus. Timers only run while Astra is in front, so it never interrupts a playing app.

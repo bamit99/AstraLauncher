@@ -3,6 +3,7 @@ package com.astra.launcher;
 import android.Manifest;
 import android.app.Activity;
 import android.app.Dialog;
+import android.app.ActivityManager;
 import android.app.admin.DevicePolicyManager;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
@@ -30,11 +31,14 @@ import android.database.Cursor;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.net.TrafficStats;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.StatFs;
+import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.text.Editable;
@@ -62,6 +66,8 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.BufferedReader;
+import java.io.FileReader;
 import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -108,7 +114,10 @@ public class MainActivity extends Activity {
     private List<AppEntry> filterSource = new ArrayList<>();
     private List<String> pins = new ArrayList<>();
     private SharedPreferences prefs;
-    private TextView netView;
+    private TextView sysView;
+    private long lastRxBytes = -1, lastRxAt = 0;
+    private long lastCpuTotal = -1, lastCpuIdle = -1, lastCpuAt = 0;
+    private int lastCpuPct = -1;
     private TextView panelNetValue;
     private TextView panelEthValue;
     private TextView searchEmpty;
@@ -190,6 +199,8 @@ public class MainActivity extends Activity {
         tickClock();
         updateNetwork();
         handler.postDelayed(clockTick, 15000);
+        handler.removeCallbacks(sysTick);
+        handler.post(sysTick);
         resetIdle();
         if ("photos".equals(prefs.getString("wallpaper", "astra"))) loadPhotos();
     }
@@ -198,6 +209,7 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         handler.removeCallbacks(clockTick);
+        handler.removeCallbacks(sysTick);
         handler.removeCallbacks(idleRunnable);
         handler.removeCallbacks(saverTick);
     }
@@ -326,6 +338,7 @@ public class MainActivity extends Activity {
         if (saverVisible || saverOverlay == null) return;
         saverVisible = true;
         handler.removeCallbacks(idleRunnable);
+        handler.removeCallbacks(sysTick);
         focusBeforeSaver = getCurrentFocus();
 
         boolean black = "black".equals(prefs.getString("saver_style", "wallpaper"));
@@ -353,6 +366,7 @@ public class MainActivity extends Activity {
         } else if (homeFirstFocus != null) {
             homeFirstFocus.requestFocus();
         }
+        handler.post(sysTick);
         resetIdle();
     }
 
@@ -808,10 +822,102 @@ public class MainActivity extends Activity {
 
     private void updateNetwork() {
         String label = networkLabel();
-        if (netView != null) netView.setText(label);
+        if (sysView != null) updateSys();
         if (panelNetValue != null) panelNetValue.setText(networkDetail());
         if (panelEthValue != null) {
             panelEthValue.setText("Ethernet".equals(label) ? "Connected" : "Not connected");
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Live system strip: throughput, CPU, RAM, storage                   */
+    /* ------------------------------------------------------------------ */
+    private final Runnable sysTick = new Runnable() {
+        @Override public void run() {
+            updateSys();
+            handler.postDelayed(this, 3000);
+        }
+    };
+
+    private void updateSys() {
+        if (sysView == null) return;
+        StringBuilder sb = new StringBuilder(networkLabel());
+
+        double mbps = netRateMbps();
+        if (mbps >= 0) sb.append(" \u2193").append(fmtRate(mbps));
+
+        int cpu = cpuPercent();
+        sb.append("  \u00b7  CPU ").append(cpu < 0 ? "\u2014" : cpu + "%");
+
+        ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+        if (am != null) {
+            ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
+            am.getMemoryInfo(mi);
+            sb.append("  \u00b7  RAM ").append(String.format(Locale.getDefault(), "%.1f/%.1fG",
+                    mi.availMem / 1073741824.0, mi.totalMem / 1073741824.0));
+        }
+
+        try {
+            StatFs st = new StatFs(android.os.Environment.getDataDirectory().getAbsolutePath());
+            long freeBytes = st.getAvailableBytes();
+            if (freeBytes >= 1073741824L) {
+                sb.append("  \u00b7  ").append(String.format(Locale.getDefault(), "%.1fG free",
+                        freeBytes / 1073741824.0));
+            } else {
+                sb.append("  \u00b7  ").append(String.format(Locale.getDefault(), "%.0fM free",
+                        freeBytes / 1048576.0));
+            }
+        } catch (Exception ignored) { }
+
+        sysView.setText(sb.toString());
+    }
+
+    private double netRateMbps() {
+        long rx = TrafficStats.getTotalRxBytes();
+        if (rx < 0) return -1;
+        long now = SystemClock.elapsedRealtime();
+        double mbps = -1;
+        if (lastRxBytes >= 0 && now > lastRxAt) {
+            double bytesPerSec = (rx - lastRxBytes) * 1000.0 / (now - lastRxAt);
+            mbps = bytesPerSec * 8 / 1000000.0;
+        }
+        lastRxBytes = rx;
+        lastRxAt = now;
+        return mbps;
+    }
+
+    private String fmtRate(double mbps) {
+        if (mbps >= 1) return String.format(Locale.getDefault(), "%.1f Mb/s", mbps);
+        return String.format(Locale.getDefault(), "%.0f Kb/s", mbps * 1000);
+    }
+
+    private int cpuPercent() {
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastCpuAt < 1500) return lastCpuPct;
+        lastCpuAt = now;
+        try (BufferedReader r = new BufferedReader(new FileReader("/proc/stat"))) {
+            String line = r.readLine();
+            if (line == null) return -1;
+            String[] f = line.trim().split("\\s+");
+            long total = 0;
+            for (int i = 1; i < f.length; i++) total += Long.parseLong(f[i]);
+            long idle = Long.parseLong(f[4]);
+            if (f.length > 5) idle += Long.parseLong(f[5]);
+
+            int pct = -1;
+            if (lastCpuTotal > 0 && total - lastCpuTotal >= 50) {
+                long dt = total - lastCpuTotal;
+                long di = idle - lastCpuIdle;
+                pct = (int) Math.round(100.0 * (dt - di) / dt);
+                if (pct < 0) pct = 0;
+                if (pct > 100) pct = 100;
+            }
+            lastCpuTotal = total;
+            lastCpuIdle = idle;
+            if (pct >= 0) lastCpuPct = pct;
+            return lastCpuPct;
+        } catch (Exception e) {
+            return -1;
         }
     }
 
@@ -1132,10 +1238,11 @@ public class MainActivity extends Activity {
         clockView = text("--:--", 14, TX2, Typeface.NORMAL);
         bar.addView(clockView);
 
-        netView = text(networkLabel(), 14, TX2, Typeface.NORMAL);
+        sysView = text("", 12, TX3, Typeface.NORMAL);
         LinearLayout.LayoutParams wlp = wrap();
         wlp.leftMargin = dp(18);
-        bar.addView(netView, wlp);
+        bar.addView(sysView, wlp);
+        updateSys();
 
         TextView search = glyphButton("⌕", v -> showSearch());
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(dp(40), dp(40));
