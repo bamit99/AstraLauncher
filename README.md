@@ -1,8 +1,11 @@
 # Astra — a dark, minimal Android TV launcher
 
 Astra is a remote-first (D-pad) launcher for Android TV / Android TV boxes. It replaces the stock
-Google TV home with a calm, dark surface: a continue card, one row of pinned apps, one row of media
-apps, and fast access to everything through a quick panel and search.
+Google TV home with a calm, dark surface: pinned apps, a detected media row and a tools row over your
+own photo wallpaper, a live system strip, and fast access to everything through a quick panel and
+search.
+
+**Current version: 1.5** · [Changelog](CHANGELOG.md)
 
 Built for and tested on a **XS97_S3_PRO** box (Rockchip `rk3518_box_32`, Android 14 / SDK 34,
 1920×1080 @ 240 dpi) — a generic Android TV device with Google TV Launcher preinstalled.
@@ -26,6 +29,7 @@ Built for and tested on a **XS97_S3_PRO** box (Rockchip `rk3518_box_32`, Android
 - [Project structure](#project-structure)
 - [Roadmap](#roadmap)
 - [Known limitations](#known-limitations)
+- [Changelog](CHANGELOG.md)
 - [License](#license)
 
 ---
