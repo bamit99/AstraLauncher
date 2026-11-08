@@ -5,7 +5,7 @@ Google TV home with a calm, dark surface: pinned apps, a detected media row and 
 own photo wallpaper, a live system strip, and fast access to everything through a quick panel and
 search.
 
-**Current version: 1.5** · [Changelog](CHANGELOG.md)
+**Current version: 1.6** · [Changelog](CHANGELOG.md)
 
 Built for and tested on a **XS97_S3_PRO** box (Rockchip `rk3518_box_32`, Android 14 / SDK 34,
 1920×1080 @ 240 dpi) — a generic Android TV device with Google TV Launcher preinstalled.
@@ -97,16 +97,17 @@ Before/after:
 - Real app icons, rendered at 38 dp inside rounded containers.
 - D-pad focus ring (2 px accent + 1.03 scale + elevation), D-pad focus restore after a context menu or
   screen rebuild, rows scroll horizontally to keep the focused tile in view.
-- **System strip in the top bar** — transport and throughput (`TrafficStats` deltas), CPU load (`/proc/stat`), available/total RAM
-  (`ActivityManager.MemoryInfo`) and free data storage (`StatFs`), refreshed every 3 s; each value degrades to `—` if the
-  kernel or provider refuses. Connection type also appears in the Quick Panel (`ConnectivityManager`).
+- **System strip in the top bar** — connection type plus `Net ↓` throughput, CPU load, available/total RAM and free
+  data storage, refreshed every 3 s and stopped whenever the launcher is not visible. Throughput is device-wide
+  (`TrafficStats` totals), which is why it is labelled `Net` rather than Wi-Fi; every value degrades to `—` if the
+  kernel or provider refuses, and a spoken description is attached for TalkBack.
 - **Idle screensaver** after a configurable delay (Off / 1 / 2 / 5 / 10 / 20 min): a thin clock and date over a
   photo slideshow or a procedural ice-blue aurora, with a pure-black OLED mode. Any key or tap returns and
   restores focus. Timers only run while Astra is in front, so it never interrupts a playing app.
 - **Photo wallpaper** — the same source drives the launcher backdrop *and* the screensaver: a static, dimmed
   scenic photo behind the rows (choose it with Settings → Home photo, a D-pad thumbnail grid; defaults to the
   first file), or the procedural ice-blue aurora. Images are read from
-  `Pictures/Astra` (or `DCIM/Astra`) through MediaStore, downscaled to 1280 px, capped at 10; the aurora is the
+  `Pictures/Astra` (or `DCIM/Astra`) through MediaStore, decoded to 16-bit at ≤1400 px and capped at 8; the aurora is the
   fallback when the folder is empty or unreadable.
 - **Astra Settings** — home photo picker, home card on/off, screensaver timeout and style, 12/24-hour clock,
   wallpaper source, preview, reset.
@@ -269,8 +270,10 @@ network status, empty states, Astra Settings, ambient screensaver). Next:
 - Photo wallpapers need `READ_MEDIA_IMAGES` and must be indexed by MediaStore — copy them with a file manager or
   trigger a media scan (`adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///...`),
   because `adb push` alone does not index. Without photos the aurora is used. Photos are downscaled to 1280 px
-  and capped at 10 to bound memory.
-- The screensaver is an in-activity overlay, not a system dream service, so it only appears while Astra is in front.
+  and capped at 8 (roughly 17 MB for the whole set) to bound memory. The set is only re-decoded when the MediaStore
+  collection changes, not on every resume.
+- The screensaver is an in-activity overlay, not a system dream service, so it only appears while Astra is in front;
+  it is torn down on pause so it can never linger over another app.
 - Quick panel exposes system settings intents, which vary by OEM.
 - Disabling Google TV Launcher also removes its search/shop surfaces; revert if you want them back.
 

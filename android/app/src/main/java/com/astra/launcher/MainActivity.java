@@ -144,6 +144,8 @@ public class MainActivity extends Activity {
     private final ArrayList<Long> photoIds = new ArrayList<>();
     private final ArrayList<String> photoNames = new ArrayList<>();
     private boolean photosLoading = false;
+    private volatile boolean photosLoaded = false;
+    private long photosSignature = -1;
 
 
     /* ------------------------------------------------------------------ */
@@ -213,6 +215,15 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(sysTick);
         handler.removeCallbacks(idleRunnable);
         handler.removeCallbacks(saverTick);
+
+        // Never keep the saver, its clock or its wallpaper animation alive behind another app.
+        if (saverVisible) {
+            saverVisible = false;
+            saverView.stop();
+            saverOverlay.animate().cancel();
+            saverOverlay.setAlpha(0f);
+            saverOverlay.setVisibility(View.GONE);
+        }
     }
 
     @Override
@@ -347,6 +358,7 @@ public class MainActivity extends Activity {
         saverView.setPhotos(saverPhotos);
         updateSaverClock();
 
+        saverOverlay.animate().cancel();
         saverOverlay.setAlpha(0f);
         saverOverlay.setVisibility(View.VISIBLE);
         saverOverlay.animate().alpha(1f).setDuration(700).start();
@@ -359,6 +371,7 @@ public class MainActivity extends Activity {
         saverVisible = false;
         handler.removeCallbacks(saverTick);
         saverView.stop();
+        saverOverlay.animate().cancel();
         saverOverlay.animate().alpha(0f).setDuration(260).withEndAction(() -> {
             if (!saverVisible) saverOverlay.setVisibility(View.GONE);
         }).start();
@@ -377,6 +390,7 @@ public class MainActivity extends Activity {
     /** One wallpaper candidate: MediaStore id, display name, content uri. */
     static class PhotoRef {
         long id;
+        long modified;
         String name;
         Uri uri;
     }
@@ -385,7 +399,8 @@ public class MainActivity extends Activity {
     private List<PhotoRef> photoRefs() {
         List<PhotoRef> out = new ArrayList<>();
         Uri base = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
-        String[] proj = {MediaStore.Images.Media._ID, MediaStore.Images.Media.DISPLAY_NAME};
+        String[] proj = {MediaStore.Images.Media._ID, MediaStore.Images.Media.DISPLAY_NAME,
+                MediaStore.Images.Media.DATE_MODIFIED};
         String sel = MediaStore.Images.Media.RELATIVE_PATH + " LIKE ? OR "
                 + MediaStore.Images.Media.RELATIVE_PATH + " LIKE ?";
         String[] args = {"Pictures/Astra%", "DCIM/Astra%"};
@@ -395,6 +410,7 @@ public class MainActivity extends Activity {
                 PhotoRef r = new PhotoRef();
                 r.id = c.getLong(0);
                 r.name = c.getString(1);
+                r.modified = c.getLong(2);
                 r.uri = ContentUris.withAppendedId(base, r.id);
                 out.add(r);
             }
@@ -404,7 +420,19 @@ public class MainActivity extends Activity {
         return out;
     }
 
+    private long photoSignature(List<PhotoRef> refs) {
+        long sig = refs.size();
+        for (PhotoRef r : refs) sig = sig * 31 + r.id * 17 + r.modified;
+        return sig;
+    }
+
     private boolean hasPhotoPermission() {
+        if (Build.VERSION.SDK_INT >= 34) {
+            return checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES)
+                    == PackageManager.PERMISSION_GRANTED
+                    || checkSelfPermission(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+                    == PackageManager.PERMISSION_GRANTED;
+        }
         if (Build.VERSION.SDK_INT >= 33) {
             return checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES)
                     == PackageManager.PERMISSION_GRANTED;
@@ -414,26 +442,43 @@ public class MainActivity extends Activity {
     }
 
     private void requestPhotoPermission() {
-        String perm = Build.VERSION.SDK_INT >= 33
-                ? Manifest.permission.READ_MEDIA_IMAGES
-                : Manifest.permission.READ_EXTERNAL_STORAGE;
-        requestPermissions(new String[]{perm}, 71);
+        if (Build.VERSION.SDK_INT >= 34) {
+            requestPermissions(new String[]{
+                    Manifest.permission.READ_MEDIA_IMAGES,
+                    Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED}, 71);
+        } else if (Build.VERSION.SDK_INT >= 33) {
+            requestPermissions(new String[]{Manifest.permission.READ_MEDIA_IMAGES}, 71);
+        } else {
+            requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, 71);
+        }
     }
 
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
         super.onRequestPermissionsResult(code, perms, results);
         if (code != 71) return;
-        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
-            loadPhotos();
+
+        boolean granted = false;
+        for (int r : results) if (r == PackageManager.PERMISSION_GRANTED) granted = true;
+
+        if (granted) {
+            // Re-query: the user may have granted only selected photos.
+            loadPhotos(true);
         } else {
+            photosLoaded = false;
+            photosSignature = -1;
             prefs.edit().putString("wallpaper", "astra").apply();
             toast("Photo access denied — using Astra wallpaper");
+            applyHomeWallpaper();
             if ("settings".equals(screen)) showSettings();
         }
     }
 
     private void loadPhotos() {
+        loadPhotos(false);
+    }
+
+    private void loadPhotos(boolean force) {
         if (photosLoading) return;
         if (!hasPhotoPermission()) {
             requestPhotoPermission();
@@ -441,11 +486,20 @@ public class MainActivity extends Activity {
         }
         photosLoading = true;
         new Thread(() -> {
+            List<PhotoRef> refs = photoRefs();
+            long sig = photoSignature(refs);
+
+            // Same collection as last time: keep the decoded bitmaps instead of re-decoding.
+            if (!force && photosLoaded && sig == photosSignature) {
+                runOnUiThread(() -> photosLoading = false);
+                return;
+            }
+
             List<Bitmap> out = new ArrayList<>();
             List<Long> ids = new ArrayList<>();
             List<String> names = new ArrayList<>();
-            for (PhotoRef r : photoRefs()) {
-                if (out.size() >= 10) break;
+            for (PhotoRef r : refs) {
+                if (out.size() >= 8) break;
                 Bitmap b = decodeWallpaper(r.uri);
                 if (b == null) continue;
                 out.add(b);
@@ -453,6 +507,7 @@ public class MainActivity extends Activity {
                 names.add(r.name);
             }
             final List<Bitmap> loaded = out;
+            final long signature = sig;
             runOnUiThread(() -> {
                 photosLoading = false;
                 saverPhotos.clear();
@@ -461,8 +516,12 @@ public class MainActivity extends Activity {
                 photoIds.addAll(ids);
                 photoNames.clear();
                 photoNames.addAll(names);
+                photosSignature = signature;
+                photosLoaded = !loaded.isEmpty();
                 if (saverView != null) saverView.setPhotos(saverPhotos);
-                if (loaded.isEmpty()) {
+                if (loaded.isEmpty() && !refs.isEmpty()) {
+                    toast("These photos can no longer be read");
+                } else if (loaded.isEmpty()) {
                     toast("No photos in Pictures/Astra — using Astra wallpaper");
                 }
                 applyHomeWallpaper();
@@ -480,11 +539,13 @@ public class MainActivity extends Activity {
             if (bounds.outWidth <= 0) return null;
 
             int sample = 1;
-            while (bounds.outWidth / (sample * 2) >= 1280) sample *= 2;
+            while (bounds.outWidth / sample > 1400) sample *= 2;
 
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inSampleSize = sample;
-            opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
+            // Wallpapers are dimmed and upscaled to 1080p; 16-bit colour is indistinguishable
+            // here and halves the heap cost of the slideshow set.
+            opts.inPreferredConfig = Bitmap.Config.RGB_565;
             try (InputStream in = getContentResolver().openInputStream(uri)) {
                 return BitmapFactory.decodeStream(in, null, opts);
             }
@@ -844,8 +905,9 @@ public class MainActivity extends Activity {
         if (sysView == null) return;
         StringBuilder sb = new StringBuilder(networkLabel());
 
+        // TrafficStats is device-wide, not per-interface: label it as such.
         double mbps = netRateMbps();
-        if (mbps >= 0) sb.append(" \u2193").append(fmtRate(mbps));
+        if (mbps >= 0) sb.append("  \u00b7  Net \u2193").append(fmtRate(mbps));
 
         int cpu = cpuPercent();
         sb.append("  \u00b7  CPU ").append(cpu < 0 ? "\u2014" : cpu + "%");
@@ -879,8 +941,11 @@ public class MainActivity extends Activity {
         long now = SystemClock.elapsedRealtime();
         double mbps = -1;
         if (lastRxBytes >= 0 && now > lastRxAt) {
-            double bytesPerSec = (rx - lastRxBytes) * 1000.0 / (now - lastRxAt);
-            mbps = bytesPerSec * 8 / 1000000.0;
+            long delta = rx - lastRxBytes;
+            if (delta >= 0) {           // a negative delta means the counters were reset
+                double bytesPerSec = delta * 1000.0 / (now - lastRxAt);
+                mbps = bytesPerSec * 8 / 1000000.0;
+            }
         }
         lastRxBytes = rx;
         lastRxAt = now;
@@ -918,7 +983,7 @@ public class MainActivity extends Activity {
             if (pct >= 0) {
                 cpuSamples++;
                 // Hide the first window: it always includes app startup noise.
-                if (cpuSamples >= 2) {
+                if (cpuSamples >= 3) {
                     lastCpuPct = lastCpuPct < 0 ? pct
                             : (int) Math.round(lastCpuPct * 0.6 + pct * 0.4);
                 }

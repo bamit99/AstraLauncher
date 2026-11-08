@@ -3,6 +3,25 @@
 All notable changes to Astra. The version below matches `versionName` in
 `android/app/build.gradle`; the app shows it in Settings → About.
 
+## [1.6] — 2026-11-08
+
+Reliability pass from the v1.5 source review (priority 0 items).
+
+### Changed
+- Wallpapers decode to RGB_565 at ≤1400 px and cap at 8 — roughly 17 MB for a full set instead of ~34 MB.
+- The photo set is only re-decoded when the MediaStore collection changes (id + `DATE_MODIFIED` signature),
+  so resuming no longer rescans or re-decodes.
+- The throughput figure is labelled `Net ↓` because `TrafficStats` is device-wide, and the strip carries a
+  spoken description for TalkBack.
+- CPU needs three measurement windows before it displays, so app-start work no longer shows as a fake 100%.
+
+### Fixed
+- Android 14 selected-photo access counts as access: `READ_MEDIA_VISUAL_USER_SELECTED` is requested and
+  honoured, and a partial grant re-queries instead of looping on the permission prompt.
+- Revoking photo access while backgrounded falls back to the aurora and clears stale photo state.
+- The screensaver is torn down on pause — overlay, animation and clock — so it cannot linger over another app.
+- `TrafficStats` counter resets no longer produce negative or absurd rates.
+
 ## [1.5] — 2026-11-08
 
 ### Added
