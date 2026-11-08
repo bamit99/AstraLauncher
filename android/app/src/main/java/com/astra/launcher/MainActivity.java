@@ -1,5 +1,6 @@
 package com.astra.launcher;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.Dialog;
 import android.app.admin.DevicePolicyManager;
@@ -11,6 +12,8 @@ import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.ColorFilter;
@@ -26,6 +29,7 @@ import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -36,6 +40,7 @@ import android.text.TextWatcher;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
@@ -54,6 +59,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -112,6 +118,20 @@ public class MainActivity extends Activity {
     private boolean searchOpen = false;
     private String screen = "home";
 
+    /* Screensaver / ambient */
+    private FrameLayout saverOverlay;
+    private SaverView saverView;
+    private TextView saverClock;
+    private TextView saverDate;
+    private boolean saverVisible = false;
+    private View focusBeforeSaver;
+    private final ArrayList<Bitmap> saverPhotos = new ArrayList<>();
+    private boolean photosLoading = false;
+
+    private static final String[] PHOTO_DIRS = {
+            "/sdcard/Pictures/Astra", "/sdcard/DCIM/Astra", "/sdcard/Astra"
+    };
+
     /* ------------------------------------------------------------------ */
     /* App model                                                          */
     /* ------------------------------------------------------------------ */
@@ -141,8 +161,10 @@ public class MainActivity extends Activity {
 
         buildSearch();
         buildPanel();
+        buildSaver();
         root.addView(searchOverlay, match());
         root.addView(panelOverlay, match());
+        root.addView(saverOverlay, match());
 
         buildHome();
         setContentView(root);
@@ -154,12 +176,36 @@ public class MainActivity extends Activity {
         tickClock();
         updateNetwork();
         handler.postDelayed(clockTick, 15000);
+        resetIdle();
+        if ("photos".equals(prefs.getString("wallpaper", "astra"))) loadPhotos();
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         handler.removeCallbacks(clockTick);
+        handler.removeCallbacks(idleRunnable);
+        handler.removeCallbacks(saverTick);
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent e) {
+        if (saverVisible) {
+            if (e.getAction() == KeyEvent.ACTION_DOWN) hideScreensaver();
+            return true;
+        }
+        if (e.getAction() == KeyEvent.ACTION_DOWN) resetIdle();
+        return super.dispatchKeyEvent(e);
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent e) {
+        if (saverVisible) {
+            if (e.getActionMasked() == MotionEvent.ACTION_DOWN) hideScreensaver();
+            return true;
+        }
+        resetIdle();
+        return super.dispatchTouchEvent(e);
     }
 
     private final Runnable clockTick = new Runnable() {
@@ -171,9 +217,397 @@ public class MainActivity extends Activity {
 
     private void tickClock() {
         if (clockView != null) {
-            clockView.setText(new SimpleDateFormat("HH:mm", Locale.getDefault()).format(new Date()));
+            clockView.setText(new SimpleDateFormat(clockPattern(), Locale.getDefault()).format(new Date()));
         }
         updateNetwork();
+    }
+
+    private String clockPattern() {
+        return prefs.getBoolean("clock24", true) ? "HH:mm" : "h:mm";
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Screensaver / ambient                                              */
+    /* ------------------------------------------------------------------ */
+    private final Runnable idleRunnable = new Runnable() {
+        @Override public void run() { showScreensaver(); }
+    };
+
+    private final Runnable saverTick = new Runnable() {
+        @Override public void run() {
+            updateSaverClock();
+            handler.postDelayed(this, 5000);
+        }
+    };
+
+    private void buildSaver() {
+        saverOverlay = new FrameLayout(this);
+        saverOverlay.setBackgroundColor(0xFF000000);
+        saverOverlay.setVisibility(View.GONE);
+
+        saverView = new SaverView(this);
+        saverOverlay.addView(saverView, match());
+
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setGravity(Gravity.CENTER_HORIZONTAL);
+
+        TextView brand = text("ASTRA", 12, 0x887CC4FF, Typeface.BOLD);
+        brand.setLetterSpacing(0.42f);
+        brand.setGravity(Gravity.CENTER);
+        col.addView(brand);
+
+        saverClock = text("--:--", 104, TX, Typeface.NORMAL);
+        saverClock.setTypeface(Typeface.create("sans-serif-thin", Typeface.NORMAL));
+        saverClock.setGravity(Gravity.CENTER);
+        saverClock.setLetterSpacing(-0.02f);
+        LinearLayout.LayoutParams clp = wrap();
+        clp.topMargin = dp(6);
+        col.addView(saverClock, clp);
+
+        saverDate = text("", 19, TX2, Typeface.NORMAL);
+        saverDate.setGravity(Gravity.CENTER);
+        saverDate.setLetterSpacing(0.04f);
+        LinearLayout.LayoutParams dlp = wrap();
+        dlp.topMargin = dp(2);
+        col.addView(saverDate, dlp);
+
+        FrameLayout.LayoutParams cfp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        cfp.gravity = Gravity.CENTER;
+        saverOverlay.addView(col, cfp);
+
+        TextView hint = text("Press any key to return", 12, TX3, Typeface.NORMAL);
+        hint.setLetterSpacing(0.06f);
+        FrameLayout.LayoutParams hfp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        hfp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+        hfp.bottomMargin = dp(34);
+        saverOverlay.addView(hint, hfp);
+    }
+
+    private int saverMinutes() {
+        return prefs.getInt("saver_minutes", 2);
+    }
+
+    private void resetIdle() {
+        handler.removeCallbacks(idleRunnable);
+        int min = saverMinutes();
+        if (min > 0 && !saverVisible) {
+            handler.postDelayed(idleRunnable, min * 60000L);
+        }
+    }
+
+    private void updateSaverClock() {
+        Date now = new Date();
+        if (saverClock != null) {
+            saverClock.setText(new SimpleDateFormat(clockPattern(), Locale.getDefault()).format(now));
+        }
+        if (saverDate != null) {
+            saverDate.setText(new SimpleDateFormat("EEE, d MMM", Locale.getDefault()).format(now));
+        }
+    }
+
+    private void showScreensaver() {
+        if (saverVisible || saverOverlay == null) return;
+        saverVisible = true;
+        handler.removeCallbacks(idleRunnable);
+        focusBeforeSaver = getCurrentFocus();
+
+        boolean black = "black".equals(prefs.getString("saver_style", "wallpaper"));
+        saverView.setBlack(black);
+        saverView.setPhotos(saverPhotos);
+        updateSaverClock();
+
+        saverOverlay.setAlpha(0f);
+        saverOverlay.setVisibility(View.VISIBLE);
+        saverOverlay.animate().alpha(1f).setDuration(700).start();
+        saverView.start();
+        handler.postDelayed(saverTick, 5000);
+    }
+
+    private void hideScreensaver() {
+        if (!saverVisible) return;
+        saverVisible = false;
+        handler.removeCallbacks(saverTick);
+        saverView.stop();
+        saverOverlay.animate().alpha(0f).setDuration(260).withEndAction(() -> {
+            if (!saverVisible) saverOverlay.setVisibility(View.GONE);
+        }).start();
+        if (focusBeforeSaver != null && focusBeforeSaver.isShown()) {
+            focusBeforeSaver.requestFocus();
+        } else if (homeFirstFocus != null) {
+            homeFirstFocus.requestFocus();
+        }
+        resetIdle();
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Photo wallpapers                                                   */
+    /* ------------------------------------------------------------------ */
+    private List<File> photoFiles() {
+        List<File> out = new ArrayList<>();
+        for (String dir : PHOTO_DIRS) {
+            File d = new File(dir);
+            File[] files = d.listFiles();
+            if (files == null) continue;
+            for (File f : files) {
+                String n = f.getName().toLowerCase(Locale.getDefault());
+                if (n.endsWith(".jpg") || n.endsWith(".jpeg") || n.endsWith(".png")
+                        || n.endsWith(".webp")) {
+                    out.add(f);
+                }
+            }
+            if (!out.isEmpty()) break;
+        }
+        Collections.sort(out, (a, b) -> a.getName().compareToIgnoreCase(b.getName()));
+        return out;
+    }
+
+    private boolean hasPhotoPermission() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            return checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES)
+                    == PackageManager.PERMISSION_GRANTED;
+        }
+        return checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void requestPhotoPermission() {
+        String perm = Build.VERSION.SDK_INT >= 33
+                ? Manifest.permission.READ_MEDIA_IMAGES
+                : Manifest.permission.READ_EXTERNAL_STORAGE;
+        requestPermissions(new String[]{perm}, 71);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
+        super.onRequestPermissionsResult(code, perms, results);
+        if (code != 71) return;
+        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
+            loadPhotos();
+        } else {
+            prefs.edit().putString("wallpaper", "astra").apply();
+            toast("Photo access denied — using Astra wallpaper");
+            if ("settings".equals(screen)) showSettings();
+        }
+    }
+
+    private void loadPhotos() {
+        if (photosLoading) return;
+        if (!hasPhotoPermission()) {
+            requestPhotoPermission();
+            return;
+        }
+        photosLoading = true;
+        new Thread(() -> {
+            List<Bitmap> out = new ArrayList<>();
+            for (File f : photoFiles()) {
+                if (out.size() >= 10) break;
+                Bitmap b = decodeWallpaper(f);
+                if (b != null) out.add(b);
+            }
+            final List<Bitmap> loaded = out;
+            runOnUiThread(() -> {
+                photosLoading = false;
+                saverPhotos.clear();
+                saverPhotos.addAll(loaded);
+                if (saverView != null) saverView.setPhotos(saverPhotos);
+                if (loaded.isEmpty()) {
+                    toast("No photos in Pictures/Astra — using Astra wallpaper");
+                }
+            });
+        }, "astra-photos").start();
+    }
+
+    private Bitmap decodeWallpaper(File f) {
+        try {
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(f.getAbsolutePath(), bounds);
+            if (bounds.outWidth <= 0) return null;
+
+            int sample = 1;
+            while (bounds.outWidth / (sample * 2) >= 1280) sample *= 2;
+
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inSampleSize = sample;
+            opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
+            return BitmapFactory.decodeFile(f.getAbsolutePath(), opts);
+        } catch (Exception | OutOfMemoryError e) {
+            return null;
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Settings                                                           */
+    /* ------------------------------------------------------------------ */
+    private static final int[] SAVER_CHOICES = {0, 1, 2, 5, 10, 20};
+
+    private int settingsIndex = 0;
+
+    private void showSettings() {
+        if (panelOpen) hidePanel(false);
+        contentHost.removeAllViews();
+        screen = "settings";
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setPadding(dp(64), dp(28), dp(64), dp(24));
+        scroll.addView(col, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.addView(text("Settings", 30, TX, Typeface.BOLD));
+        View spacer = new View(this);
+        head.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1f));
+        head.addView(text("Astra", 13, TX3, Typeface.NORMAL));
+        col.addView(head);
+
+        TextView sub = text("Changes are saved immediately.", 13, TX3, Typeface.NORMAL);
+        LinearLayout.LayoutParams slp = wrap();
+        slp.topMargin = dp(4);
+        col.addView(sub, slp);
+
+        final View[] rows = new View[6];
+
+        // Screensaver timeout
+        final int min = saverMinutes();
+        rows[0] = settingRow("Screensaver", saverLabel(min), (v, code, e) -> {
+            if (e.getAction() != KeyEvent.ACTION_DOWN) return false;
+            int step = code == KeyEvent.KEYCODE_DPAD_RIGHT ? 1
+                    : code == KeyEvent.KEYCODE_DPAD_LEFT ? -1 : 0;
+            if (step == 0) return false;
+            int next = cycleSaver(min, step);
+            prefs.edit().putInt("saver_minutes", next).apply();
+            settingsIndex = 0;
+            showSettings();
+            return true;
+        }, null);
+
+        // Style
+        final boolean black = "black".equals(prefs.getString("saver_style", "wallpaper"));
+        rows[1] = settingRow("Screensaver style", black ? "Black" : "Wallpaper", (v, code, e) -> {
+            if (e.getAction() != KeyEvent.ACTION_DOWN) return false;
+            if (code != KeyEvent.KEYCODE_DPAD_LEFT && code != KeyEvent.KEYCODE_DPAD_RIGHT) return false;
+            prefs.edit().putString("saver_style", black ? "wallpaper" : "black").apply();
+            settingsIndex = 1;
+            showSettings();
+            return true;
+        }, null);
+
+        // Clock format
+        final boolean clock24 = prefs.getBoolean("clock24", true);
+        rows[2] = settingRow("Clock", clock24 ? "24-hour" : "12-hour", (v, code, e) -> {
+            if (e.getAction() != KeyEvent.ACTION_DOWN) return false;
+            if (code != KeyEvent.KEYCODE_DPAD_LEFT && code != KeyEvent.KEYCODE_DPAD_RIGHT) return false;
+            prefs.edit().putBoolean("clock24", !clock24).apply();
+            tickClock();
+            settingsIndex = 2;
+            showSettings();
+            return true;
+        }, null);
+
+        // Wallpaper source
+        final String source = prefs.getString("wallpaper", "astra");
+        rows[3] = settingRow("Wallpaper", "photos".equals(source) ? "Photo folder" : "Astra",
+                (v, code, e) -> {
+                    if (e.getAction() != KeyEvent.ACTION_DOWN) return false;
+                    if (code != KeyEvent.KEYCODE_DPAD_LEFT && code != KeyEvent.KEYCODE_DPAD_RIGHT) return false;
+                    prefs.edit().putString("wallpaper", "photos".equals(source) ? "astra" : "photos").apply();
+                    if ("photos".equals(prefs.getString("wallpaper", "astra"))) loadPhotos();
+                    settingsIndex = 3;
+                    showSettings();
+                    return true;
+                }, null);
+
+        // Preview
+        rows[4] = settingRow("Preview screensaver", "Start now", null, v -> {
+            settingsIndex = 4;
+            showScreensaver();
+        });
+
+        // Reset
+        rows[5] = settingRow("Reset preferences", "Restore defaults", null, v -> {
+            prefs.edit()
+                    .remove("saver_minutes")
+                    .remove("saver_style")
+                    .remove("clock24")
+                    .remove("wallpaper")
+                    .apply();
+            settingsIndex = 5;
+            toast("Preferences reset");
+            showSettings();
+        });
+
+        for (int i = 0; i < rows.length; i++) {
+            LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(62));
+            rlp.topMargin = i == 0 ? dp(24) : dp(10);
+            col.addView(rows[i], rlp);
+        }
+
+        TextView about = text("Astra " + versionName() + " · MIT · github.com/bamit99/AstraLauncher",
+                12, TX3, Typeface.NORMAL);
+        LinearLayout.LayoutParams alp = wrap();
+        alp.topMargin = dp(26);
+        col.addView(about, alp);
+
+        contentHost.addView(scroll, match());
+        final int focus = settingsIndex;
+        contentHost.post(() -> {
+            View target = focus >= 0 && focus < rows.length ? rows[focus] : rows[0];
+            if (target != null) target.requestFocus();
+        });
+    }
+
+    private String saverLabel(int minutes) {
+        if (minutes <= 0) return "Off";
+        return minutes + " min";
+    }
+
+    private String versionName() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private int cycleSaver(int current, int step) {
+        int idx = 0;
+        for (int i = 0; i < SAVER_CHOICES.length; i++) {
+            if (SAVER_CHOICES[i] == current) { idx = i; break; }
+        }
+        idx = (idx + step + SAVER_CHOICES.length) % SAVER_CHOICES.length;
+        return SAVER_CHOICES[idx];
+    }
+
+    private View settingRow(String label, String value,
+                            View.OnKeyListener keys, View.OnClickListener click) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setFocusable(true);
+        row.setPadding(dp(20), 0, dp(20), 0);
+        row.setBackground(rounded(RAISED, 14, LINE, 1));
+        row.setContentDescription(label + ", " + value);
+
+        TextView l = text(label, 16, TX, Typeface.NORMAL);
+        row.addView(l);
+        View spacer = new View(this);
+        row.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1f));
+        row.addView(text(value, 14, ACCENT, Typeface.NORMAL));
+
+        row.setOnFocusChangeListener((v, f) -> applyFocus(v, f, 14));
+        if (keys != null) row.setOnKeyListener(keys);
+        if (click != null) row.setOnClickListener(click);
+        return row;
     }
 
     /* ------------------------------------------------------------------ */
@@ -377,6 +811,7 @@ public class MainActivity extends Activity {
         View allTile = actionTile("All apps", "⌗", this::showApps);
         pinnedRow.addView(allTile);
         if (homeFirstFocus == null) homeFirstFocus = allTile;
+        fitRow(pinnedRow);
         col.addView(hscroll(pinnedRow));
 
         // Streaming row
@@ -398,6 +833,7 @@ public class MainActivity extends Activity {
                 count++;
             }
         }
+        fitRow(mediaRow);
         col.addView(hscroll(mediaRow));
 
         contentHost.addView(scroll, match());
@@ -507,6 +943,37 @@ public class MainActivity extends Activity {
         h.addView(content, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return h;
+    }
+
+    /**
+     * Size a home row so a whole number of cards ends exactly at the right margin.
+     *
+     * <p>Fixed-width cards plus a fixed gap left a partial card clipped by the row viewport,
+     * which reads as a chopped edge on a TV. Cards shrink only as far as 120 dp; beyond that
+     * the row scrolls, and the clip lands in the gap between cards.
+     */
+    private void fitRow(LinearLayout row) {
+        int n = row.getChildCount();
+        if (n == 0) return;
+
+        int avail = getResources().getDisplayMetrics().widthPixels - dp(128);
+        int gap = dp(14);
+        int minW = dp(120);
+        int maxW = dp(170);
+
+        int visible = n;
+        while (visible > 1 && (avail - (visible - 1) * gap) / visible < minW) visible--;
+
+        int width = Math.min((avail - (visible - 1) * gap) / visible, maxW);
+        for (int i = 0; i < n; i++) {
+            View v = row.getChildAt(i);
+            ViewGroup.LayoutParams raw = v.getLayoutParams();
+            if (!(raw instanceof LinearLayout.LayoutParams)) continue;
+            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) raw;
+            lp.width = width;
+            lp.rightMargin = i == n - 1 ? 0 : gap;
+            v.setLayoutParams(lp);
+        }
     }
 
     private View appTile(AppEntry e, boolean withIcon) {
@@ -882,9 +1349,10 @@ public class MainActivity extends Activity {
         panel.addView(panelRow("Sound", "TV speakers", intentAction(Settings.ACTION_SOUND_SETTINGS)));
         panel.addView(panelRow("Storage", "Manage space", intentAction(Settings.ACTION_INTERNAL_STORAGE_SETTINGS)));
         panel.addView(divider());
-        panel.addView(panelRow("Launcher settings", "Astra", null));
+        panel.addView(panelActionRow("Launcher settings", "Astra", this::showSettings));
         panel.addView(panelActionRow("Refresh app list", "Rescan installed apps", this::refreshApps));
         panel.addView(panelRow("System settings", "Android TV", intentAction(Settings.ACTION_SETTINGS)));
+        panel.addView(panelActionRow("Screensaver", "Start now", this::showScreensaver));
         panel.addView(panelActionRow("Sleep", "Turn display off", this::sleepDevice));
         panel.addView(panelActionRow("Power", "Restart or shut down", this::showPowerDialog));
     }
@@ -928,6 +1396,7 @@ public class MainActivity extends Activity {
 
         row.setOnFocusChangeListener((view, f) -> applyFocus(view, f, 12));
         row.setOnClickListener(view -> {
+            hidePanel(false);
             if (action != null) {
                 action.run();
             } else {
@@ -1123,19 +1592,25 @@ public class MainActivity extends Activity {
     }
 
     private void hidePanel() {
+        hidePanel(true);
+    }
+
+    private void hidePanel(boolean restoreFocus) {
         if (!panelOpen) return;
         panelOpen = false;
         panel.animate().translationX(dp(360)).setDuration(180).start();
         panelScrim.animate().alpha(0f).setDuration(180).withEndAction(() -> {
             panelOverlay.setVisibility(View.GONE);
-            if (panelTrigger != null) panelTrigger.requestFocus();
+            if (restoreFocus && panelTrigger != null) panelTrigger.requestFocus();
         }).start();
     }
 
     @Override
     public void onBackPressed() {
+        if (saverVisible) { hideScreensaver(); return; }
         if (panelOpen) { hidePanel(); return; }
         if (searchOpen) { hideSearch(); return; }
+        if ("settings".equals(screen)) { showHome(); return; }
         if ("apps".equals(screen)) { showHome(); return; }
         showPanel();
     }

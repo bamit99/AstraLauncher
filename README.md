@@ -50,10 +50,18 @@ tasks. Astra is the opposite — an explicit, honest surface:
 | ![](docs/screenshots/03-concept-quick-panel.jpg) | ![](docs/screenshots/09-prototype-panel.png) | ![](docs/screenshots/16-device-panel-network.png) |
 | ![](docs/screenshots/04-concept-search.jpg) | ![](docs/screenshots/08-prototype-search.png) | ![](docs/screenshots/12-device-search.png) |
 
-- **Home** — quick-start card, pinned row, streaming/media row, top bar with clock, live network status, search and panel.
+- **Home** — quick-start card, pinned row, streaming/media row, top bar with clock, live network status, search and panel. Rows always end on a gap, never through a card.
 - **Apps** — category chips (All / Media / Tools / System), 7-column grid of every launchable app, long-press for a context menu (Open / Pin / Unpin / App info).
-- **Quick panel** — right sheet with live network and Ethernet state, date/time, HDMI, display, sound, storage, refresh app list, system settings, sleep and power.
+- **Quick panel** — right sheet with live network and Ethernet state, date/time, HDMI, display, sound, storage, refresh app list, Astra settings, screensaver, sleep and power. Every row closes the panel when it acts.
 - **Search** — filters installed apps as you type, launches them, and shows an empty state when nothing matches.
+- **Screensaver / ambient** — after an idle delay: a thin clock over the Astra aurora or your own photo folder, optional pure-black mode; any key returns to the launcher.
+- **Settings** — screensaver timeout and style, 12/24-hour clock, wallpaper source, preview and reset.
+
+Screensaver and settings:
+
+| Aurora | Black | Settings | Photo folder |
+|---|---|---|---|
+| ![](docs/screenshots/18-saver-aurora.png) | ![](docs/screenshots/19-saver-black.png) | ![](docs/screenshots/20-settings.png) | ![](docs/screenshots/21-saver-photos.png) |
 
 Before/after:
 
@@ -73,6 +81,12 @@ Before/after:
 - D-pad focus ring (2 px accent + 1.03 scale + elevation), D-pad focus restore after a context menu or
   screen rebuild, rows scroll horizontally to keep the focused tile in view.
 - Live connection status in the top bar and Quick Panel (`ConnectivityManager` / `NetworkCapabilities`).
+- **Idle screensaver** after a configurable delay (Off / 1 / 2 / 5 / 10 / 20 min): a thin clock and date over a
+  photo slideshow or a procedural ice-blue aurora, with a pure-black OLED mode. Any key or tap returns and
+  restores focus. Timers only run while Astra is in front, so it never interrupts a playing app.
+- **Photo wallpapers** from `/sdcard/Pictures/Astra` (then `/sdcard/DCIM/Astra`, `/sdcard/Astra`), decoded
+  downscaled and cross-faded; the aurora is the fallback when the folder is empty.
+- **Astra Settings** — screensaver timeout and style, 12/24-hour clock, wallpaper source, preview, reset.
 - Quick panel opens on `Back` from Home (or the `≡` button) and restores focus when closed.
 - Search overlay with live filtering, a designed empty state, and launch on Enter.
 - `FLAG_KEEP_SCREEN_ON` while the launcher is visible.
@@ -213,13 +227,13 @@ AstraLauncher/
 
 ## Roadmap
 
-Phase 1 of the UI/UX review is done (persisted pins, Pin/Unpin menu, focus restore, live network status,
-empty states, refresh action). Next:
+Phase 1 and Phase 2 of the UI/UX review are done (persisted pins, Pin/Unpin menu, focus restore, live
+network status, empty states, Astra Settings, ambient screensaver). Next:
 
-- Reorder pinned apps with the D-pad, and an Astra Settings screen for rows, layout and clock format.
+- Reorder pinned apps with the D-pad, and show/hide individual Home rows.
 - Search across content providers (deep links into Stremio/Plex/YouTube) instead of apps only.
 - Optional "Continue" row driven by `UsageStatsManager` (with graceful degradation when access is denied).
-- Optional screensaver / ambient mode, and a read-only home-lab status row.
+- Read-only home-lab status row (NAS, server, AdGuard, VPN).
 - Compose for TV rewrite once the interaction model is frozen.
 
 ## Known limitations
@@ -229,6 +243,9 @@ empty states, refresh action). Next:
 - Reboot/shut down need a usable `su` for the app UID. On the reference box `/system/xbin/su` is
   `root:shell 4750`, so app-initiated root fails and the dialog falls back to system settings.
 - Home rows are not user-reorderable yet; pins can be pinned/unpinned but not rearranged.
+- Photo wallpapers need `READ_MEDIA_IMAGES`; without it, or with an empty Astra folder, the screensaver uses the
+  built-in aurora. Photos are downscaled to 1280 px and capped at 10 to bound memory.
+- The screensaver is an in-activity overlay, not a system dream service, so it only appears while Astra is in front.
 - Quick panel exposes system settings intents, which vary by OEM.
 - Disabling Google TV Launcher also removes its search/shop surfaces; revert if you want them back.
 

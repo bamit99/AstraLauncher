@@ -123,13 +123,22 @@ Respect system “remove animations”: replace transitions with instant state, 
 | `Dialog` | 560w, bg/raised, 24 radius, title 32, body 24, actions right |
 
 ## 6. Android implementation notes
-- **Stack:** Kotlin; Jetpack Compose for TV or Leanback. Prefer Compose TV for focus APIs; fall back to Leanback if Compose TV unstable on RK3518.
+- **Stack:** Java, plain framework `View`s, single `Activity` (no AndroidX, no Compose) — ~70 KB APK, instant cold start on RK3518.
 - **Manifest:** `HOME` + `DEFAULT`; also `LEANBACK_LAUNCHER` for TV rail discovery. Keep Google TV Launcher installed; user switches HOME explicitly.
-- **Data:** `LauncherApps`/`PackageManager` for apps, `Intent` resolution for launch; recents via `UsageStatsManager` only with user-granted access (graceful degrade).
-- **Performance:** cache icons at target dp; prefetch row 0/1; avoid main-thread IO; target 60fps focus.
+- **Data:** `PackageManager` for apps and labels, `Intent` resolution for launch; prefs in `SharedPreferences` (`astra`).
+- **Performance:** cache icons at target dp; prefetch row 0/1; avoid main-thread IO; target 60 fps focus; wallpaper layers pre-rendered once and animated with a `Matrix`.
 - **TV specifics:** overscan-safe 5% margins; D-pad key handling (`KEYCODE_DPAD_*`, `MENU`, `BACK`), no touch dependencies.
-- **Empty/error states:** explicit, actionable (e.g., “No apps found — open Play Store”).
-- **Accessibility:** TalkBack labels on tiles; focus order = reading order; min contrast met; respect font scale (sp up to 1.3 without clipping).
+- **Home rows:** card width computed so a whole number of cards ends exactly on the right margin; rows only scroll when the count exceeds the 120 dp minimum, and then the clip falls in the gap between cards.
+- **Empty/error states:** explicit, actionable (e.g., “No apps match that search”, “No photos in Pictures/Astra”).
+- **Accessibility:** content descriptions on tiles and actions; focus order = reading order; min contrast met; respect font scale.
+
+### Ambient / screensaver
+- **Trigger:** idle delay from Settings (Off / 1 / 2 / 5 / 10 / 20 min). Timer resets on every key/touch and only runs while Astra is in front — never over a playing app.
+- **Layers:** wallpaper (photo slideshow or procedural aurora) → 35% scrim → wordmark, 104 sp thin clock, date; “Press any key to return” at the bottom.
+- **Motion:** 700 ms fade in, ~46 s aurora drift, 22 s photo hold with 2.6 s cross-fade and 5% slow zoom. No motion that blocks input.
+- **Exit:** any key or tap, 260 ms fade out, focus restored to where the user left it.
+- **Wallpaper sources:** `/sdcard/Pictures/Astra`, then `/sdcard/DCIM/Astra`, then `/sdcard/Astra`; `READ_MEDIA_IMAGES` requested on demand; built-in aurora when unavailable.
+- **Black mode:** pure `#000000` with the clock only, for OLED.
 
 ## 7. Deliverables status
 - [x] Baseline captures (device)
@@ -137,7 +146,7 @@ Respect system “remove animations”: replace transitions with instant state, 
 - [x] Home mockup
 - [x] Apps mockup
 - [x] Quick Panel mockup
-- [ ] Search mockup (in progress)
-- [ ] Optional: long-press context menu mockup
-- [ ] Optional: clickable prototype (8b)
-- [ ] Optional: Android launcher starter (8c)
+- [x] Search mockup
+- [x] Android launcher (`android/`)
+- [x] Astra Settings, screensaver / ambient, photo wallpapers
+- [ ] Provider deep links and content search
