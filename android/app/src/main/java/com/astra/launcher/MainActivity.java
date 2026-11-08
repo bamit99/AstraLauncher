@@ -131,6 +131,8 @@ public class MainActivity extends Activity {
     private boolean saverVisible = false;
     private View focusBeforeSaver;
     private final ArrayList<Bitmap> saverPhotos = new ArrayList<>();
+    private final ArrayList<Long> photoIds = new ArrayList<>();
+    private final ArrayList<String> photoNames = new ArrayList<>();
     private boolean photosLoading = false;
 
 
@@ -357,18 +359,29 @@ public class MainActivity extends Activity {
     /* ------------------------------------------------------------------ */
     /* Photo wallpapers                                                   */
     /* ------------------------------------------------------------------ */
+    /** One wallpaper candidate: MediaStore id, display name, content uri. */
+    static class PhotoRef {
+        long id;
+        String name;
+        Uri uri;
+    }
+
     /** Wallpaper images live in Pictures/Astra (or DCIM/Astra); read through MediaStore. */
-    private List<Uri> photoUris() {
-        List<Uri> out = new ArrayList<>();
+    private List<PhotoRef> photoRefs() {
+        List<PhotoRef> out = new ArrayList<>();
         Uri base = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
-        String[] proj = {MediaStore.Images.Media._ID};
+        String[] proj = {MediaStore.Images.Media._ID, MediaStore.Images.Media.DISPLAY_NAME};
         String sel = MediaStore.Images.Media.RELATIVE_PATH + " LIKE ? OR "
                 + MediaStore.Images.Media.RELATIVE_PATH + " LIKE ?";
         String[] args = {"Pictures/Astra%", "DCIM/Astra%"};
         try (Cursor c = getContentResolver().query(base, proj, sel, args,
                 MediaStore.Images.Media.DISPLAY_NAME + " ASC")) {
             while (c != null && c.moveToNext()) {
-                out.add(ContentUris.withAppendedId(base, c.getLong(0)));
+                PhotoRef r = new PhotoRef();
+                r.id = c.getLong(0);
+                r.name = c.getString(1);
+                r.uri = ContentUris.withAppendedId(base, r.id);
+                out.add(r);
             }
         } catch (Exception ignored) {
             // provider unavailable — caller falls back to the built-in wallpaper
@@ -414,16 +427,25 @@ public class MainActivity extends Activity {
         photosLoading = true;
         new Thread(() -> {
             List<Bitmap> out = new ArrayList<>();
-            for (Uri u : photoUris()) {
+            List<Long> ids = new ArrayList<>();
+            List<String> names = new ArrayList<>();
+            for (PhotoRef r : photoRefs()) {
                 if (out.size() >= 10) break;
-                Bitmap b = decodeWallpaper(u);
-                if (b != null) out.add(b);
+                Bitmap b = decodeWallpaper(r.uri);
+                if (b == null) continue;
+                out.add(b);
+                ids.add(r.id);
+                names.add(r.name);
             }
             final List<Bitmap> loaded = out;
             runOnUiThread(() -> {
                 photosLoading = false;
                 saverPhotos.clear();
                 saverPhotos.addAll(loaded);
+                photoIds.clear();
+                photoIds.addAll(ids);
+                photoNames.clear();
+                photoNames.addAll(names);
                 if (saverView != null) saverView.setPhotos(saverPhotos);
                 if (loaded.isEmpty()) {
                     toast("No photos in Pictures/Astra — using Astra wallpaper");
@@ -491,7 +513,7 @@ public class MainActivity extends Activity {
         slp.topMargin = dp(4);
         col.addView(sub, slp);
 
-        final View[] rows = new View[7];
+        final View[] rows = new View[8];
 
         // Screensaver timeout
         final int min = saverMinutes();
@@ -543,33 +565,40 @@ public class MainActivity extends Activity {
                     return true;
                 }, null);
 
+        // Home photo
+        int chosen = photoIds.indexOf(prefs.getLong("home_photo_id", -1L));
+        String photoLabel = chosen >= 0 ? photoNames.get(chosen)
+                : (photoIds.isEmpty() ? "\u2014" : "First photo");
+        rows[4] = settingRow("Home photo", photoLabel, null, v -> showPhotoPicker());
+
         // Home card
         final boolean homeCard = prefs.getBoolean("home_card", false);
-        rows[4] = settingRow("Home card", homeCard ? "On" : "Off", (v, code, e) -> {
+        rows[5] = settingRow("Home card", homeCard ? "On" : "Off", (v, code, e) -> {
             if (e.getAction() != KeyEvent.ACTION_DOWN) return false;
             if (code != KeyEvent.KEYCODE_DPAD_LEFT && code != KeyEvent.KEYCODE_DPAD_RIGHT) return false;
             prefs.edit().putBoolean("home_card", !homeCard).apply();
-            settingsIndex = 4;
+            settingsIndex = 5;
             showSettings();
             return true;
         }, null);
 
         // Preview
-        rows[5] = settingRow("Preview screensaver", "Start now", null, v -> {
-            settingsIndex = 5;
+        rows[6] = settingRow("Preview screensaver", "Start now", null, v -> {
+            settingsIndex = 6;
             showScreensaver();
         });
 
         // Reset
-        rows[6] = settingRow("Reset preferences", "Restore defaults", null, v -> {
+        rows[7] = settingRow("Reset preferences", "Restore defaults", null, v -> {
             prefs.edit()
                     .remove("saver_minutes")
                     .remove("saver_style")
                     .remove("clock24")
                     .remove("wallpaper")
                     .remove("home_card")
+                    .remove("home_photo_id")
                     .apply();
-            settingsIndex = 6;
+            settingsIndex = 7;
             toast("Preferences reset");
             showSettings();
         });
@@ -593,6 +622,117 @@ public class MainActivity extends Activity {
             View target = focus >= 0 && focus < rows.length ? rows[focus] : rows[0];
             if (target != null) target.requestFocus();
         });
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Home photo picker                                                  */
+    /* ------------------------------------------------------------------ */
+    private void showPhotoPicker() {
+        if (panelOpen) hidePanel(false);
+        contentHost.removeAllViews();
+        screen = "picker";
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setPadding(dp(64), dp(28), dp(64), dp(24));
+        scroll.addView(col, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.addView(text("Home photo", 30, TX, Typeface.BOLD));
+        View spacer = new View(this);
+        head.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1f));
+        head.addView(text("Astra", 13, TX3, Typeface.NORMAL));
+        col.addView(head);
+
+        TextView sub = text("Pick the image behind your apps. The screensaver still cycles every photo.",
+                13, TX3, Typeface.NORMAL);
+        LinearLayout.LayoutParams slp = wrap();
+        slp.topMargin = dp(4);
+        col.addView(sub, slp);
+
+        if (saverPhotos.isEmpty()) {
+            TextView empty = text("No photos found. Add images to Pictures/Astra, then reopen this screen.",
+                    15, TX3, Typeface.NORMAL);
+            LinearLayout.LayoutParams elp = wrap();
+            elp.topMargin = dp(28);
+            col.addView(empty, elp);
+            contentHost.addView(scroll, match());
+            return;
+        }
+
+        final long current = prefs.getLong("home_photo_id", -1L);
+        final View[] first = new View[1];
+        int perRow = 4;
+        for (int i = 0; i < saverPhotos.size(); i += perRow) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            rlp.topMargin = dp(i == 0 ? 26 : 14);
+            row.setLayoutParams(rlp);
+            for (int j = 0; j < perRow; j++) {
+                int p = i + j;
+                if (p >= saverPhotos.size()) {
+                    View filler = new View(this);
+                    row.addView(filler, new LinearLayout.LayoutParams(0, 1, 1f));
+                    continue;
+                }
+                View tile = photoTile(p, current);
+                if (first[0] == null) first[0] = tile;
+                row.addView(tile);
+            }
+            col.addView(row);
+        }
+
+        contentHost.addView(scroll, match());
+        contentHost.post(() -> { if (first[0] != null) first[0].requestFocus(); });
+    }
+
+    private View photoTile(final int index, long currentId) {
+        boolean selected = photoIds.get(index) == currentId;
+
+        FrameLayout tile = new FrameLayout(this);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(158), 1f);
+        lp.rightMargin = dp(14);
+        tile.setLayoutParams(lp);
+        tile.setBackground(rounded(selected ? ACCENT_SOFT : CARD, 16,
+                selected ? ACCENT : LINE, selected ? 2 : 1));
+        tile.setFocusable(true);
+        tile.setContentDescription(photoNames.get(index));
+
+        ImageView iv = new ImageView(this);
+        iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        iv.setImageBitmap(saverPhotos.get(index));
+        roundedOutline(iv, 12);
+        FrameLayout.LayoutParams ilp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+        ilp.setMargins(dp(5), dp(5), dp(5), dp(5));
+        tile.addView(iv, ilp);
+
+        if (selected) {
+            TextView check = text("\u2713", 13, ACCENT, Typeface.BOLD);
+            check.setGravity(Gravity.CENTER);
+            check.setBackground(rounded(0xCC0B0D10, 999, 0, 0));
+            FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(dp(26), dp(26));
+            clp.gravity = Gravity.TOP | Gravity.END;
+            clp.setMargins(0, dp(12), dp(12), 0);
+            tile.addView(check, clp);
+        }
+
+        tile.setOnFocusChangeListener((v, f) -> applyFocus(v, f, 16));
+        tile.setOnClickListener(v -> {
+            prefs.edit().putLong("home_photo_id", photoIds.get(index)).apply();
+            applyHomeWallpaper();
+            toast("Home wallpaper set");
+            showSettings();
+        });
+        return tile;
     }
 
     private String saverLabel(int minutes) {
@@ -757,7 +897,11 @@ public class MainActivity extends Activity {
     private void applyHomeWallpaper() {
         if (homeWall == null || homeScrim == null) return;
         boolean wantPhoto = "photos".equals(prefs.getString("wallpaper", "astra"));
-        Bitmap bmp = wantPhoto && !saverPhotos.isEmpty() ? saverPhotos.get(0) : null;
+        Bitmap bmp = null;
+        if (wantPhoto && !saverPhotos.isEmpty()) {
+            int idx = photoIds.indexOf(prefs.getLong("home_photo_id", -1L));
+            bmp = saverPhotos.get(idx >= 0 ? idx : 0);
+        }
 
         if (bmp == null) {
             homeWall.setVisibility(View.GONE);
@@ -1711,6 +1855,7 @@ public class MainActivity extends Activity {
         if (saverVisible) { hideScreensaver(); return; }
         if (panelOpen) { hidePanel(); return; }
         if (searchOpen) { hideSearch(); return; }
+        if ("picker".equals(screen)) { showSettings(); return; }
         if ("settings".equals(screen)) { showHome(); return; }
         if ("apps".equals(screen)) { showHome(); return; }
         showPanel();
