@@ -118,6 +118,7 @@ public class MainActivity extends Activity {
     private long lastRxBytes = -1, lastRxAt = 0;
     private long lastCpuTotal = -1, lastCpuIdle = -1, lastCpuAt = 0;
     private int lastCpuPct = -1;
+    private int cpuSamples = 0;
     private TextView panelNetValue;
     private TextView panelEthValue;
     private TextView searchEmpty;
@@ -914,7 +915,14 @@ public class MainActivity extends Activity {
             }
             lastCpuTotal = total;
             lastCpuIdle = idle;
-            if (pct >= 0) lastCpuPct = pct;
+            if (pct >= 0) {
+                cpuSamples++;
+                // Hide the first window: it always includes app startup noise.
+                if (cpuSamples >= 2) {
+                    lastCpuPct = lastCpuPct < 0 ? pct
+                            : (int) Math.round(lastCpuPct * 0.6 + pct * 0.4);
+                }
+            }
             return lastCpuPct;
         } catch (Exception e) {
             return -1;
