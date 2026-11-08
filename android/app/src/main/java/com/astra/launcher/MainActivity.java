@@ -8,6 +8,7 @@ import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.ContentUris;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
@@ -25,6 +26,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.ColorDrawable;
+import android.database.Cursor;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
@@ -33,6 +35,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.MediaStore;
 import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextUtils;
@@ -59,7 +62,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.io.File;
+import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -119,6 +122,8 @@ public class MainActivity extends Activity {
     private String screen = "home";
 
     /* Screensaver / ambient */
+    private ImageView homeWall;
+    private View homeScrim;
     private FrameLayout saverOverlay;
     private SaverView saverView;
     private TextView saverClock;
@@ -128,9 +133,6 @@ public class MainActivity extends Activity {
     private final ArrayList<Bitmap> saverPhotos = new ArrayList<>();
     private boolean photosLoading = false;
 
-    private static final String[] PHOTO_DIRS = {
-            "/sdcard/Pictures/Astra", "/sdcard/DCIM/Astra", "/sdcard/Astra"
-    };
 
     /* ------------------------------------------------------------------ */
     /* App model                                                          */
@@ -155,6 +157,16 @@ public class MainActivity extends Activity {
 
         root = new FrameLayout(this);
         root.setBackground(new GlowDrawable());
+
+        homeWall = new ImageView(this);
+        homeWall.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        homeWall.setAlpha(0.70f);
+        homeWall.setVisibility(View.GONE);
+        root.addView(homeWall, match());
+
+        homeScrim = new View(this);
+        homeScrim.setVisibility(View.GONE);
+        root.addView(homeScrim, match());
 
         contentHost = new FrameLayout(this);
         root.addView(contentHost, match());
@@ -345,22 +357,22 @@ public class MainActivity extends Activity {
     /* ------------------------------------------------------------------ */
     /* Photo wallpapers                                                   */
     /* ------------------------------------------------------------------ */
-    private List<File> photoFiles() {
-        List<File> out = new ArrayList<>();
-        for (String dir : PHOTO_DIRS) {
-            File d = new File(dir);
-            File[] files = d.listFiles();
-            if (files == null) continue;
-            for (File f : files) {
-                String n = f.getName().toLowerCase(Locale.getDefault());
-                if (n.endsWith(".jpg") || n.endsWith(".jpeg") || n.endsWith(".png")
-                        || n.endsWith(".webp")) {
-                    out.add(f);
-                }
+    /** Wallpaper images live in Pictures/Astra (or DCIM/Astra); read through MediaStore. */
+    private List<Uri> photoUris() {
+        List<Uri> out = new ArrayList<>();
+        Uri base = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
+        String[] proj = {MediaStore.Images.Media._ID};
+        String sel = MediaStore.Images.Media.RELATIVE_PATH + " LIKE ? OR "
+                + MediaStore.Images.Media.RELATIVE_PATH + " LIKE ?";
+        String[] args = {"Pictures/Astra%", "DCIM/Astra%"};
+        try (Cursor c = getContentResolver().query(base, proj, sel, args,
+                MediaStore.Images.Media.DISPLAY_NAME + " ASC")) {
+            while (c != null && c.moveToNext()) {
+                out.add(ContentUris.withAppendedId(base, c.getLong(0)));
             }
-            if (!out.isEmpty()) break;
+        } catch (Exception ignored) {
+            // provider unavailable — caller falls back to the built-in wallpaper
         }
-        Collections.sort(out, (a, b) -> a.getName().compareToIgnoreCase(b.getName()));
         return out;
     }
 
@@ -402,9 +414,9 @@ public class MainActivity extends Activity {
         photosLoading = true;
         new Thread(() -> {
             List<Bitmap> out = new ArrayList<>();
-            for (File f : photoFiles()) {
+            for (Uri u : photoUris()) {
                 if (out.size() >= 10) break;
-                Bitmap b = decodeWallpaper(f);
+                Bitmap b = decodeWallpaper(u);
                 if (b != null) out.add(b);
             }
             final List<Bitmap> loaded = out;
@@ -416,15 +428,18 @@ public class MainActivity extends Activity {
                 if (loaded.isEmpty()) {
                     toast("No photos in Pictures/Astra — using Astra wallpaper");
                 }
+                applyHomeWallpaper();
             });
         }, "astra-photos").start();
     }
 
-    private Bitmap decodeWallpaper(File f) {
+    private Bitmap decodeWallpaper(Uri uri) {
         try {
             BitmapFactory.Options bounds = new BitmapFactory.Options();
             bounds.inJustDecodeBounds = true;
-            BitmapFactory.decodeFile(f.getAbsolutePath(), bounds);
+            try (InputStream in = getContentResolver().openInputStream(uri)) {
+                BitmapFactory.decodeStream(in, null, bounds);
+            }
             if (bounds.outWidth <= 0) return null;
 
             int sample = 1;
@@ -433,7 +448,9 @@ public class MainActivity extends Activity {
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inSampleSize = sample;
             opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
-            return BitmapFactory.decodeFile(f.getAbsolutePath(), opts);
+            try (InputStream in = getContentResolver().openInputStream(uri)) {
+                return BitmapFactory.decodeStream(in, null, opts);
+            }
         } catch (Exception | OutOfMemoryError e) {
             return null;
         }
@@ -474,7 +491,7 @@ public class MainActivity extends Activity {
         slp.topMargin = dp(4);
         col.addView(sub, slp);
 
-        final View[] rows = new View[6];
+        final View[] rows = new View[7];
 
         // Screensaver timeout
         final int min = saverMinutes();
@@ -526,21 +543,33 @@ public class MainActivity extends Activity {
                     return true;
                 }, null);
 
-        // Preview
-        rows[4] = settingRow("Preview screensaver", "Start now", null, v -> {
+        // Home card
+        final boolean homeCard = prefs.getBoolean("home_card", false);
+        rows[4] = settingRow("Home card", homeCard ? "On" : "Off", (v, code, e) -> {
+            if (e.getAction() != KeyEvent.ACTION_DOWN) return false;
+            if (code != KeyEvent.KEYCODE_DPAD_LEFT && code != KeyEvent.KEYCODE_DPAD_RIGHT) return false;
+            prefs.edit().putBoolean("home_card", !homeCard).apply();
             settingsIndex = 4;
+            showSettings();
+            return true;
+        }, null);
+
+        // Preview
+        rows[5] = settingRow("Preview screensaver", "Start now", null, v -> {
+            settingsIndex = 5;
             showScreensaver();
         });
 
         // Reset
-        rows[5] = settingRow("Reset preferences", "Restore defaults", null, v -> {
+        rows[6] = settingRow("Reset preferences", "Restore defaults", null, v -> {
             prefs.edit()
                     .remove("saver_minutes")
                     .remove("saver_style")
                     .remove("clock24")
                     .remove("wallpaper")
+                    .remove("home_card")
                     .apply();
-            settingsIndex = 5;
+            settingsIndex = 6;
             toast("Preferences reset");
             showSettings();
         });
@@ -721,9 +750,41 @@ public class MainActivity extends Activity {
     /* ------------------------------------------------------------------ */
     /* Home                                                               */
     /* ------------------------------------------------------------------ */
+    /**
+     * Home backdrop. One source setting drives both screens: the Astra aurora glow,
+     * or a static scenic photo (dimmed and scrimmed so rows and labels stay legible).
+     */
+    private void applyHomeWallpaper() {
+        if (homeWall == null || homeScrim == null) return;
+        boolean wantPhoto = "photos".equals(prefs.getString("wallpaper", "astra"));
+        Bitmap bmp = wantPhoto && !saverPhotos.isEmpty() ? saverPhotos.get(0) : null;
+
+        if (bmp == null) {
+            homeWall.setVisibility(View.GONE);
+            homeScrim.setVisibility(View.GONE);
+            root.setBackground(new GlowDrawable());
+            return;
+        }
+
+        GradientDrawable scrim = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0x7A070A0F, 0x99070A0F, 0xB8070A0F});
+        boolean wasHidden = homeWall.getVisibility() != View.VISIBLE;
+        homeWall.setImageBitmap(bmp);
+        homeWall.setVisibility(View.VISIBLE);
+        if (wasHidden) {
+            homeWall.setAlpha(0f);
+            homeWall.animate().alpha(0.70f).setDuration(500).start();
+        }
+        homeScrim.setBackground(scrim);
+        homeScrim.setVisibility(View.VISIBLE);
+        root.setBackgroundColor(BG);
+    }
+
     private void buildHome() {
         contentHost.removeAllViews();
         screen = "home";
+        applyHomeWallpaper();
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -738,6 +799,13 @@ public class MainActivity extends Activity {
 
         col.addView(buildTopBar());
 
+        // Hero / quick-start card is opt-in: the pinned row already covers launch targets.
+        boolean showCard = prefs.getBoolean("home_card", false);
+        if (!showCard) {
+            View topGap = new View(this);
+            col.addView(topGap, new LinearLayout.LayoutParams(1, dp(16)));
+        }
+        if (showCard) {
         // Hero / continue
         AppEntry heroApp = byPkg("org.smarttube.stable");
         if (heroApp == null) heroApp = firstMedia();
@@ -785,6 +853,7 @@ public class MainActivity extends Activity {
             else showApps();
         });
         col.addView(hero);
+        }
 
         // Pinned row
         int pinnedCount = 0;
@@ -836,6 +905,28 @@ public class MainActivity extends Activity {
         fitRow(mediaRow);
         col.addView(hscroll(mediaRow));
 
+        // Tools row — utilities and anything that is not media
+        LinearLayout toolsRow = new LinearLayout(this);
+        toolsRow.setOrientation(LinearLayout.HORIZONTAL);
+        toolsRow.setPadding(0, dp(2), 0, dp(6));
+        int toolTotal = 0;
+        for (AppEntry e : apps) {
+            if (!isTool(e)) continue;
+            toolTotal++;
+        }
+        int tools = 0;
+        for (AppEntry e : apps) {
+            if (tools >= 8) break;
+            if (!isTool(e)) continue;
+            toolsRow.addView(appTile(e, true));
+            tools++;
+        }
+        if (tools > 0) {
+            col.addView(sectionHeader("TOOLS", toolTotal > tools ? tools + " of " + toolTotal : ""));
+            fitRow(toolsRow);
+            col.addView(hscroll(toolsRow));
+        }
+
         contentHost.addView(scroll, match());
         contentHost.post(() -> { if (homeFirstFocus != null) homeFirstFocus.requestFocus(); });
     }
@@ -858,6 +949,16 @@ public class MainActivity extends Activity {
 
     private void savePins(List<String> list) {
         prefs.edit().putString("pins", TextUtils.join(",", list)).apply();
+    }
+
+    /** Utilities for the Tools row: no media, no launcher, no vendor diagnostic noise. */
+    private boolean isTool(AppEntry e) {
+        if (e.pkg.equals(getPackageName())) return false;
+        if (isMedia(e.pkg)) return false;
+        String label = e.label.toLowerCase(Locale.ROOT);
+        if (label.startsWith("system ")) return false;
+        if (label.equals("all apps")) return false;
+        return true;
     }
 
     private AppEntry firstMedia() {

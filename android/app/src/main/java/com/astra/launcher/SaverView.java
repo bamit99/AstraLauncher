@@ -88,12 +88,17 @@ public class SaverView extends View {
         long t = SystemClock.uptimeMillis() - origin;
 
         if (!black) {
-            if (!photos.isEmpty()) drawPhoto(c, t);
-            else drawAurora(c, t);
+            if (!photos.isEmpty()) {
+                drawPhoto(c, t);
+                drawVignette(c, 0x55000000);
+            } else {
+                drawAurora(c, t);
+                drawVignette(c, 0x99000000);
+            }
         } else {
             c.drawColor(0xFF000000);
+            drawVignette(c, 0x55000000);
         }
-        drawVignette(c);
 
         if (running) postInvalidateOnAnimation();
     }
@@ -145,19 +150,23 @@ public class SaverView extends View {
     }
 
     private void drawPhoto(Canvas c, long t) {
-        if (t - switchedAt > PHOTO_HOLD_MS) {
-            switchedAt = t;
+        long now = SystemClock.uptimeMillis();
+        if (switchedAt == 0) switchedAt = now;
+        if (now - switchedAt > PHOTO_HOLD_MS) {
+            switchedAt = now;
             index = (index + 1) % photos.size();
         }
-        long since = t - switchedAt;
+        long since = now - switchedAt;
         float fade = Math.min(1f, since / (float) PHOTO_FADE_MS);
 
-        int prev = (index - 1 + photos.size()) % photos.size();
-        drawPhoto(c, photos.get(prev), 1f, 1.05f);
-        drawPhoto(c, photos.get(index), fade, 1f + 0.05f * (since / (float) PHOTO_HOLD_MS));
+        if (fade < 1f) {
+            int prev = (index - 1 + photos.size()) % photos.size();
+            drawPhoto(c, photos.get(prev), 1f, 1.05f);
+        }
+        drawPhoto(c, photos.get(index), fade, 1f + 0.04f * (since / (float) PHOTO_HOLD_MS));
 
         paint.setAlpha(255);
-        scrim.setColor(0x5A070A0F);
+        scrim.setColor(0x30070A0F);
         c.drawRect(0, 0, getWidth(), getHeight(), scrim);
     }
 
@@ -173,10 +182,10 @@ public class SaverView extends View {
         c.drawBitmap(bmp, matrix, paint);
     }
 
-    private void drawVignette(Canvas c) {
+    private void drawVignette(Canvas c, int edge) {
         float w = getWidth(), h = getHeight();
-        RadialGradient g = new RadialGradient(w / 2f, h / 2f, Math.max(w, h) * 0.72f,
-                new int[]{0x00000000, 0x00000000, 0x99000000},
+        RadialGradient g = new RadialGradient(w / 2f, h / 2f, Math.max(w, h) * 0.78f,
+                new int[]{0x00000000, 0x00000000, edge},
                 new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP);
         paint.setAlpha(255);
         paint.setShader(g);

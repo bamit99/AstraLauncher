@@ -50,7 +50,7 @@ tasks. Astra is the opposite — an explicit, honest surface:
 | ![](docs/screenshots/03-concept-quick-panel.jpg) | ![](docs/screenshots/09-prototype-panel.png) | ![](docs/screenshots/16-device-panel-network.png) |
 | ![](docs/screenshots/04-concept-search.jpg) | ![](docs/screenshots/08-prototype-search.png) | ![](docs/screenshots/12-device-search.png) |
 
-- **Home** — quick-start card, pinned row, streaming/media row, top bar with clock, live network status, search and panel. Rows always end on a gap, never through a card.
+- **Home** — pinned row, streaming/media row and a tools row, with the clock, live network status, search and panel in the top bar. The quick-start card is opt-in (Settings → Home card, default off) because the pinned row already covers launch targets. Rows always end on a gap, never through a card.
 - **Apps** — category chips (All / Media / Tools / System), 7-column grid of every launchable app, long-press for a context menu (Open / Pin / Unpin / App info).
 - **Quick panel** — right sheet with live network and Ethernet state, date/time, HDMI, display, sound, storage, refresh app list, Astra settings, screensaver, sleep and power. Every row closes the panel when it acts.
 - **Search** — filters installed apps as you type, launches them, and shows an empty state when nothing matches.
@@ -62,6 +62,15 @@ Screensaver and settings:
 | Aurora | Black | Settings | Photo folder |
 |---|---|---|---|
 | ![](docs/screenshots/18-saver-aurora.png) | ![](docs/screenshots/19-saver-black.png) | ![](docs/screenshots/20-settings.png) | ![](docs/screenshots/21-saver-photos.png) |
+
+The same photo source backs the launcher itself:
+
+| Home with a photo wallpaper |
+|---|
+| ![](docs/screenshots/22-home-wallpaper.png) |
+
+Sample wallpapers (drop them into `Pictures/Astra`):
+[`aurora-lake.jpg`](docs/wallpapers/aurora-lake.jpg) · [`fog-ridges.jpg`](docs/wallpapers/fog-ridges.jpg)
 
 Before/after:
 
@@ -84,9 +93,11 @@ Before/after:
 - **Idle screensaver** after a configurable delay (Off / 1 / 2 / 5 / 10 / 20 min): a thin clock and date over a
   photo slideshow or a procedural ice-blue aurora, with a pure-black OLED mode. Any key or tap returns and
   restores focus. Timers only run while Astra is in front, so it never interrupts a playing app.
-- **Photo wallpapers** from `/sdcard/Pictures/Astra` (then `/sdcard/DCIM/Astra`, `/sdcard/Astra`), decoded
-  downscaled and cross-faded; the aurora is the fallback when the folder is empty.
-- **Astra Settings** — screensaver timeout and style, 12/24-hour clock, wallpaper source, preview, reset.
+- **Photo wallpaper** — the same setting drives the launcher backdrop *and* the screensaver: a static, dimmed
+  scenic photo behind the rows, or the procedural ice-blue aurora. Images are read from
+  `Pictures/Astra` (or `DCIM/Astra`) through MediaStore, downscaled to 1280 px, capped at 10; the aurora is the
+  fallback when the folder is empty or unreadable.
+- **Astra Settings** — home card on/off, screensaver timeout and style, 12/24-hour clock, wallpaper source, preview, reset.
 - Quick panel opens on `Back` from Home (or the `≡` button) and restores focus when closed.
 - Search overlay with live filtering, a designed empty state, and launch on Enter.
 - `FLAG_KEEP_SCREEN_ON` while the launcher is visible.
@@ -243,8 +254,10 @@ network status, empty states, Astra Settings, ambient screensaver). Next:
 - Reboot/shut down need a usable `su` for the app UID. On the reference box `/system/xbin/su` is
   `root:shell 4750`, so app-initiated root fails and the dialog falls back to system settings.
 - Home rows are not user-reorderable yet; pins can be pinned/unpinned but not rearranged.
-- Photo wallpapers need `READ_MEDIA_IMAGES`; without it, or with an empty Astra folder, the screensaver uses the
-  built-in aurora. Photos are downscaled to 1280 px and capped at 10 to bound memory.
+- Photo wallpapers need `READ_MEDIA_IMAGES` and must be indexed by MediaStore — copy them with a file manager or
+  trigger a media scan (`adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///...`),
+  because `adb push` alone does not index. Without photos the aurora is used. Photos are downscaled to 1280 px
+  and capped at 10 to bound memory.
 - The screensaver is an in-activity overlay, not a system dream service, so it only appears while Astra is in front.
 - Quick panel exposes system settings intents, which vary by OEM.
 - Disabling Google TV Launcher also removes its search/shop surfaces; revert if you want them back.
