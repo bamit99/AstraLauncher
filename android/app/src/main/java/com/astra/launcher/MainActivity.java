@@ -7,6 +7,7 @@ import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -21,6 +22,9 @@ import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.ColorDrawable;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -93,6 +97,12 @@ public class MainActivity extends Activity {
     private ListView searchList;
     private List<AppEntry> apps = new ArrayList<>();
     private List<AppEntry> filterSource = new ArrayList<>();
+    private List<String> pins = new ArrayList<>();
+    private SharedPreferences prefs;
+    private TextView netView;
+    private TextView panelNetValue;
+    private TextView panelEthValue;
+    private TextView searchEmpty;
     private View homeFirstFocus;
     private View panelTrigger;
     private int category = 0;
@@ -120,6 +130,8 @@ public class MainActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         apps = loadApps(getPackageManager());
+        prefs = getSharedPreferences("astra", MODE_PRIVATE);
+        pins = loadPins();
 
         root = new FrameLayout(this);
         root.setBackground(new GlowDrawable());
@@ -140,6 +152,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         tickClock();
+        updateNetwork();
         handler.postDelayed(clockTick, 15000);
     }
 
@@ -160,6 +173,50 @@ public class MainActivity extends Activity {
         if (clockView != null) {
             clockView.setText(new SimpleDateFormat("HH:mm", Locale.getDefault()).format(new Date()));
         }
+        updateNetwork();
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Network status                                                     */
+    /* ------------------------------------------------------------------ */
+    private NetworkCapabilities activeCaps() {
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+        if (cm == null) return null;
+        Network n = cm.getActiveNetwork();
+        if (n == null) return null;
+        return cm.getNetworkCapabilities(n);
+    }
+
+    private String networkLabel() {
+        NetworkCapabilities c = activeCaps();
+        if (c == null) return "Offline";
+        if (c.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) return "Ethernet";
+        if (c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return "Wi-Fi";
+        if (c.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) return "Mobile";
+        return "Online";
+    }
+
+    private String networkDetail() {
+        NetworkCapabilities c = activeCaps();
+        if (c == null) return "Not connected";
+        String label = networkLabel();
+        return "Connected · " + label;
+    }
+
+    private void updateNetwork() {
+        String label = networkLabel();
+        if (netView != null) netView.setText(label);
+        if (panelNetValue != null) panelNetValue.setText(networkDetail());
+        if (panelEthValue != null) {
+            panelEthValue.setText("Ethernet".equals(label) ? "Connected" : "Not connected");
+        }
+    }
+
+    private void refreshApps() {
+        apps = loadApps(getPackageManager());
+        pins = loadPins();
+        toast("App list refreshed");
+        if ("apps".equals(screen)) showApps(); else buildHome();
     }
 
     @Override
@@ -252,7 +309,7 @@ public class MainActivity extends Activity {
         if (heroApp == null) heroApp = firstMedia();
         FrameLayout hero = new FrameLayout(this);
         LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(148));
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(178));
         hlp.topMargin = dp(22);
         hero.setLayoutParams(hlp);
         hero.setFocusable(true);
@@ -263,21 +320,21 @@ public class MainActivity extends Activity {
         heroCol.setOrientation(LinearLayout.VERTICAL);
         heroCol.setGravity(Gravity.CENTER_VERTICAL);
 
-        TextView kicker = text("CONTINUE WATCHING", 11, ACCENT, Typeface.BOLD);
+        TextView kicker = text("QUICK START", 11, ACCENT, Typeface.BOLD);
         kicker.setLetterSpacing(0.18f);
         heroCol.addView(kicker);
 
-        TextView title = text(heroApp == null ? "Your media, one press away" : heroApp.label + " · Subscriptions", 28, TX, Typeface.BOLD);
+        TextView title = text(heroApp == null ? "Your apps" : heroApp.label, 28, TX, Typeface.BOLD);
         LinearLayout.LayoutParams tlp = wrap();
         tlp.topMargin = dp(6);
         heroCol.addView(title, tlp);
 
-        TextView sub = text("Pick up where you left off", 14, TX2, Typeface.NORMAL);
+        TextView sub = text("Open your media apps in one press", 14, TX2, Typeface.NORMAL);
         LinearLayout.LayoutParams slp = wrap();
         slp.topMargin = dp(4);
         heroCol.addView(sub, slp);
 
-        TextView resume = text("▶  Resume", 13, ACCENT, Typeface.BOLD);
+        TextView resume = text("▶  Open", 13, ACCENT, Typeface.BOLD);
         resume.setBackground(rounded(ACCENT_SOFT, 999, 0x667CC4FF, 1));
         resume.setPadding(dp(16), dp(9), dp(16), dp(9));
         LinearLayout.LayoutParams rlp = wrap();
@@ -297,19 +354,25 @@ public class MainActivity extends Activity {
 
         // Pinned row
         int pinnedCount = 0;
-        for (String pkg : PINNED) if (byPkg(pkg) != null) pinnedCount++;
+        for (String pkg : pins) if (byPkg(pkg) != null) pinnedCount++;
         col.addView(sectionHeader("PINNED", pinnedCount + " apps"));
         LinearLayout pinnedRow = new LinearLayout(this);
         pinnedRow.setOrientation(LinearLayout.HORIZONTAL);
         pinnedRow.setPadding(0, dp(2), 0, dp(6));
 
         boolean first = true;
-        for (String pkg : PINNED) {
+        for (String pkg : pins) {
             AppEntry e = byPkg(pkg);
             if (e == null) continue;
             View tile = appTile(e, true);
             pinnedRow.addView(tile);
             if (first) { homeFirstFocus = tile; first = false; }
+        }
+        if (pinnedRow.getChildCount() == 0) {
+            View hint = actionTile("Pin apps", "+", this::showApps);
+            pinnedRow.addView(hint);
+            homeFirstFocus = hint;
+            first = false;
         }
         View allTile = actionTile("All apps", "⌗", this::showApps);
         pinnedRow.addView(allTile);
@@ -342,8 +405,23 @@ public class MainActivity extends Activity {
     }
 
     private boolean isPinned(String pkg) {
-        for (String p : PINNED) if (p.equals(pkg)) return true;
-        return false;
+        return pins.contains(pkg);
+    }
+
+    private List<String> loadPins() {
+        String raw = prefs.getString("pins", null);
+        List<String> out = new ArrayList<>();
+        if (raw == null) {
+            for (String p : PINNED) if (byPkg(p) != null) out.add(p);
+            savePins(out);
+        } else if (!raw.isEmpty()) {
+            for (String p : raw.split(",")) if (byPkg(p) != null) out.add(p);
+        }
+        return out;
+    }
+
+    private void savePins(List<String> list) {
+        prefs.edit().putString("pins", TextUtils.join(",", list)).apply();
     }
 
     private AppEntry firstMedia() {
@@ -373,10 +451,10 @@ public class MainActivity extends Activity {
         clockView = text("--:--", 14, TX2, Typeface.NORMAL);
         bar.addView(clockView);
 
-        TextView wifi = text("Wi-Fi", 14, TX2, Typeface.NORMAL);
+        netView = text(networkLabel(), 14, TX2, Typeface.NORMAL);
         LinearLayout.LayoutParams wlp = wrap();
         wlp.leftMargin = dp(18);
-        bar.addView(wifi, wlp);
+        bar.addView(netView, wlp);
 
         TextView search = glyphButton("⌕", v -> showSearch());
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(dp(40), dp(40));
@@ -463,10 +541,12 @@ public class MainActivity extends Activity {
         label.setPadding(dp(4), dp(7), dp(4), 0);
         tile.addView(label, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        tile.setContentDescription(e.label);
+        tile.setTag(e.pkg);
 
         tile.setOnFocusChangeListener((v, f) -> applyFocus(v, f, 18));
         tile.setOnClickListener(v -> launch(e));
-        tile.setOnLongClickListener(v -> { appInfo(e); return true; });
+        tile.setOnLongClickListener(v -> { showAppMenu(v, e); return true; });
         return tile;
     }
 
@@ -493,6 +573,7 @@ public class MainActivity extends Activity {
 
         tile.setOnFocusChangeListener((v, f) -> applyFocus(v, f, 18));
         tile.setOnClickListener(v -> action.run());
+        tile.setContentDescription(label);
         return tile;
     }
 
@@ -649,6 +730,11 @@ public class MainActivity extends Activity {
         searchList.setLayoutParams(llp);
         searchOverlay.addView(searchList);
 
+        searchEmpty = text("No apps match that search", 15, TX3, Typeface.NORMAL);
+        searchEmpty.setPadding(dp(16), dp(6), 0, 0);
+        searchEmpty.setVisibility(View.GONE);
+        searchOverlay.addView(searchEmpty);
+
         filterSource = new ArrayList<>(apps);
         searchList.setAdapter(new BaseAdapter() {
             @Override public int getCount() { return filterSource.size(); }
@@ -721,6 +807,9 @@ public class MainActivity extends Activity {
         if (searchList != null) {
             ((BaseAdapter) searchList.getAdapter()).notifyDataSetChanged();
         }
+        if (searchEmpty != null) {
+            searchEmpty.setVisibility(filterSource.isEmpty() ? View.VISIBLE : View.GONE);
+        }
     }
 
     private void showSearch() {
@@ -779,8 +868,13 @@ public class MainActivity extends Activity {
         profile.addView(names, nlp);
         panel.addView(profile);
 
-        panel.addView(panelRow("Wi-Fi", "Connected · 5 GHz", intentAction(Settings.ACTION_WIFI_SETTINGS)));
-        panel.addView(panelRow("Ethernet", "Not connected", (Intent) null));
+        View netRow = panelRow("Network", networkDetail(), intentAction(Settings.ACTION_WIFI_SETTINGS));
+        panelNetValue = rowValue(netRow);
+        panel.addView(netRow);
+
+        View ethRow = panelRow("Ethernet", "Not connected", null);
+        panelEthValue = rowValue(ethRow);
+        panel.addView(ethRow);
         panel.addView(panelRow("Date & time", new SimpleDateFormat("EEE d MMM · HH:mm", Locale.getDefault()).format(new Date()), intentAction(Settings.ACTION_DATE_SETTINGS)));
         panel.addView(divider());
         panel.addView(panelRow("HDMI input", "Switch source", intentAction("android.settings.TV_INPUT_SETTINGS")));
@@ -789,6 +883,7 @@ public class MainActivity extends Activity {
         panel.addView(panelRow("Storage", "Manage space", intentAction(Settings.ACTION_INTERNAL_STORAGE_SETTINGS)));
         panel.addView(divider());
         panel.addView(panelRow("Launcher settings", "Astra", null));
+        panel.addView(panelActionRow("Refresh app list", "Rescan installed apps", this::refreshApps));
         panel.addView(panelRow("System settings", "Android TV", intentAction(Settings.ACTION_SETTINGS)));
         panel.addView(panelActionRow("Sleep", "Turn display off", this::sleepDevice));
         panel.addView(panelActionRow("Power", "Restart or shut down", this::showPowerDialog));
@@ -800,6 +895,15 @@ public class MainActivity extends Activity {
             try { startActivity(intent); }
             catch (ActivityNotFoundException ex) { toast("Not available"); }
         });
+    }
+
+    /** The secondary (value) TextView of a panel row built by {@link #panelActionRow}. */
+    private TextView rowValue(View row) {
+        try {
+            return (TextView) ((LinearLayout) ((LinearLayout) row).getChildAt(0)).getChildAt(1);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private View panelActionRow(String label, String value, final Runnable action) {
@@ -1059,6 +1163,75 @@ public class MainActivity extends Activity {
         } catch (ActivityNotFoundException ex) {
             toast("No app info");
         }
+    }
+
+    private void showAppMenu(View anchor, final AppEntry e) {
+        final Dialog dlg = new Dialog(this);
+        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(shaped(RAISED, LINE, 2));
+        card.setPadding(dp(26), dp(24), dp(26), dp(20));
+
+        card.addView(text(e.label, 22, TX, Typeface.BOLD));
+        TextView sub = text(e.pkg, 12, TX3, Typeface.NORMAL);
+        LinearLayout.LayoutParams slp = wrap();
+        slp.topMargin = dp(4);
+        card.addView(sub, slp);
+
+        TextView open = dialogButton("Open", true);
+        LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
+        olp.topMargin = dp(18);
+        open.setOnClickListener(v -> {
+            dlg.dismiss();
+            launch(e);
+        });
+        card.addView(open, olp);
+
+        final boolean pinned = isPinned(e.pkg);
+        TextView pin = dialogButton(pinned ? "Unpin from Home" : "Pin to Home", false);
+        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
+        plp.topMargin = dp(10);
+        pin.setOnClickListener(v -> {
+            dlg.dismiss();
+            List<String> next = new ArrayList<>(pins);
+            if (next.contains(e.pkg)) next.remove(e.pkg); else next.add(e.pkg);
+            pins = next;
+            savePins(pins);
+            toast(next.contains(e.pkg) ? "Pinned " + e.label : "Unpinned " + e.label);
+            if ("apps".equals(screen)) showApps(); else buildHome();
+            contentHost.post(() -> focusTile(e.pkg));
+        });
+        card.addView(pin, plp);
+
+        TextView info = dialogButton("App info", false);
+        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
+        ilp.topMargin = dp(10);
+        info.setOnClickListener(v -> {
+            dlg.dismiss();
+            appInfo(e);
+        });
+        card.addView(info, ilp);
+
+        TextView cancel = dialogButton("Cancel", false);
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
+        clp.topMargin = dp(18);
+        cancel.setOnClickListener(v -> dlg.dismiss());
+        card.addView(cancel, clp);
+
+        presentDialog(dlg, card, cancel);
+    }
+
+    /** Restore focus to the tile of a package after a screen rebuild. */
+    private void focusTile(String pkg) {
+        if (pkg == null || contentHost == null) return;
+        View v = contentHost.findViewWithTag(pkg);
+        if (v != null) v.requestFocus();
     }
 
     private Intent intentAction(String action) {

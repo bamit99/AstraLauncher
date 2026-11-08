@@ -83,8 +83,8 @@ Respect system “remove animations”: replace transitions with instant state, 
 
 ### Home
 - **Top bar (h 72):** wordmark left; right: clock, network glyph, Search, Quick Panel. Auto-hide after 8s idle; any D-pad reveals.
-- **Hero:** optional Continue card (last app/content), 16:9, art dimmed to 55% brightness, title + “Resume” action. If no signal, collapse hero entirely (no placeholder art).
-- **Pinned row:** 7–9 items, 240×140 tiles, icon + label, initial focus target.
+- **Hero:** optional quick-start card for the first media app, action copy “Open” — never claims to resume a title that the launcher cannot actually resume. If no media app exists, collapse the hero entirely (no placeholder art).
+- **Pinned row:** user-pinned apps persisted in `SharedPreferences` (`astra` / `pins`), 7–9 items, initial focus target; rows scroll horizontally so the focused tile is never clipped.
 - **Streaming row:** Leanback apps from PackageManager, 220×132 cards.
 - **Apps/Tools row:** remaining apps + Files/Settings/Store.
 - Vertical scroll only when rows overflow; horizontal scroll per row with inset shadows.
@@ -98,7 +98,7 @@ Respect system “remove animations”: replace transitions with instant state, 
 
 ### Quick Panel
 - **Presentation:** right sheet 440px, scrim 64%, over dimmed/blurred Home.
-- **Rows (h 64):** profile, network (Wi-Fi/Ethernet + status), date/time, HDMI input, display mode, audio output, storage (thin bar), divider, Launcher settings, Android TV settings, Sleep, Power.
+- **Rows (h 64):** profile, network (live Wi-Fi/Ethernet + status), date/time, HDMI input, display mode, audio output, storage (thin bar), divider, refresh app list, Launcher settings, Android TV settings, Sleep, Power.
 - **Behavior:** toggles/rows activate on OK; Back closes and returns focus to the trigger.
 - **Destructive:** Power/Sleep require confirm dialog (single-step confirm, default = Cancel).
 
