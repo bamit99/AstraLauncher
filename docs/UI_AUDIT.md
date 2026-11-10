@@ -269,3 +269,37 @@ frame. Both are cheap to hoist.
 **Recommended first Phase 1 slice:** F-2 and F-1 are defects, not design work, and both are visible
 in the very first frames of any new visual pass — fix them at the start of Phase 1 (focus primitives)
 and Phase 3 (panel), and keep the rest of Phase 1 to Home surfaces only.
+
+---
+
+## 9. Phase 1 verification — 2026-11-10
+
+Scope: focus primitives and Home surfaces only (`feature/ui-phase-1-home`). No content, layout
+structure, panel, search or settings work.
+
+| Finding | Status | Evidence |
+|---|---|---|
+| F-2 focus blur mutated rest surfaces | **fixed** | `FocusSurface` captures the rest background/elevation and restores both. Settings rows stay `raised` after focus passes (`docs/screenshots/phase-1/05-settings-focus-restored.png`); panel rows stay transparent. |
+| F-7 card geometry drift (Home 104 dp vs library 112 dp, radii 18 vs 20) | **fixed** | Both screens use `AppCardView` (20 dp radius, 40 dp icon, 104 dp tall). |
+| F-8 tokens hard-coded in call sites | **partly fixed** | Tokens now live in `Palette`; `MainActivity` aliases them. A few component-local radii (12/14/16 dp) are still literals. |
+| F-9 duplicated tile/focus primitives | **partly fixed** | Tile builder and both focus handlers replaced by `AppCardView` + `FocusSurface`; `MainActivity` is 2,220 lines (was 2,255) and carries three fewer bespoke focus/tile implementations. |
+| F-1 quick panel overflow | open (Phase 3) | unchanged |
+| F-3 fabricated/stale panel values | open (Phase 3) | unchanged |
+| F-4 duplicated Home content | open (Phase 2/4) | unchanged |
+| F-5 2.5 s cold start | open (Phase 2/6) | unchanged |
+| F-6 search overlay styling | open (Phase 5) | unchanged |
+| F-10 accessibility gaps | open (Phase 5) | content descriptions still absent on chips and the strip |
+| F-11 screensaver per-frame allocation | open (Phase 5) | unchanged |
+| **F-12 (new, P1) dialogs open with no focused child** | open (Phase 5) | Long-press menu appears with no ring; the first D-pad press lands on Open. Pre-existing (`presentDialog` → `post(requestFocus)` runs before the dialog window has focus). |
+
+### Re-measured baseline after Phase 1
+
+| Metric | Phase 0 | Phase 1 |
+|---|---|---|
+| APK | 57,536 B | **58,323 B** (+787 B, +1.4%) |
+| Cold start | 2.479 / 2.479 / 2.502 s | 2.514 / 2.516 s (one 3.164 s outlier after a force-stop from the library) |
+| PSS / RSS | 73,903 / 144,532 KB | 75,453 / 147,116 KB (+2.1% PSS) |
+| Focus traverse (12 steps) | 37 frames, 29.7% janky, p50 32 ms, p90 53 ms | 38 frames, 31.6% janky, p50 32 ms, p90 48 ms |
+
+No performance claim is made for Phase 1: the numbers are inside baseline noise. The frame budget is
+still missed (p50 32 ms vs 16.7 ms), which is why Phase 6 keeps a measurement gate.

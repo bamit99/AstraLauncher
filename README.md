@@ -10,7 +10,7 @@ search.
 Built for and tested on a **XS97_S3_PRO** box (Rockchip `rk3518_box_32`, Android 14 / SDK 34,
 1920×1080 @ 240 dpi) — a generic Android TV device with Google TV Launcher preinstalled.
 
-![Astra home on device](docs/screenshots/10-device-home.png)
+![Astra home on device](docs/screenshots/phase-1/01-home-rest.png)
 
 ---
 
@@ -49,12 +49,12 @@ tasks. Astra is the opposite — an explicit, honest surface:
 
 | Concept | Prototype | On device |
 |---|---|---|
-| ![](docs/screenshots/01-concept-home.jpg) | ![](docs/screenshots/06-prototype-home.png) | ![](docs/screenshots/10-device-home.png) |
+| ![](docs/screenshots/01-concept-home.jpg) | ![](docs/screenshots/06-prototype-home.png) | ![](docs/screenshots/phase-1/01-home-rest.png) |
 | ![](docs/screenshots/02-concept-apps.jpg) | ![](docs/screenshots/07-prototype-apps.png) | ![](docs/screenshots/11-device-apps.png) |
 | ![](docs/screenshots/03-concept-quick-panel.jpg) | ![](docs/screenshots/09-prototype-panel.png) | ![](docs/screenshots/16-device-panel-network.png) |
 | ![](docs/screenshots/04-concept-search.jpg) | ![](docs/screenshots/08-prototype-search.png) | ![](docs/screenshots/12-device-search.png) |
 
-- **Home** — pinned row, streaming/media row and a tools row, with a live system strip (throughput, CPU, RAM, free storage), clock, search and panel in the top bar. The quick-start card is opt-in (Settings → Home card, default off) because the pinned row already covers launch targets. Rows always end on a gap, never through a card.
+- **Home** — pinned row, streaming/media row and a tools row, with a live system strip (throughput, CPU, RAM, free storage), today's date, clock, search and panel in the top bar. The quick-start card is opt-in (Settings → Home card, default off) because the pinned row already covers launch targets. Rows always end on a gap, never through a card.
 - **Apps** — category chips (All / Media / Tools / System), 7-column grid of every launchable app, long-press for a context menu (Open / Pin / Unpin / App info).
 - **Quick panel** — right sheet with live network and Ethernet state, date/time, HDMI, display, sound, storage, refresh app list, Astra settings, screensaver, sleep and power. Every row closes the panel when it acts.
 - **Search** — filters installed apps as you type, launches them, and shows an empty state when nothing matches.
@@ -94,7 +94,7 @@ Before/after:
   Plex, Prime Video, Disney+ and Netflix all appear.
 - Pinned apps and their order are persisted in `SharedPreferences` (`astra` / `pins`); long-press any
   tile to pin or unpin it, and the home row updates immediately.
-- Real app icons, rendered at 38 dp inside rounded containers.
+- Real app icons, rendered at 40 dp inside rounded containers; every Home shelf and the library use the same card size and focus treatment.
 - D-pad focus ring (2 px accent + 1.03 scale + elevation), D-pad focus restore after a context menu or
   screen rebuild, rows scroll horizontally to keep the focused tile in view.
 - **System strip in the top bar** — connection type plus `Net ↓` throughput, CPU load, available/total RAM and free
@@ -121,14 +121,16 @@ Before/after:
 ## How it works
 
 Single Activity, no AndroidX, no third-party dependencies — plain framework views, which keeps the
-APK ~50 KB and startup instant.
+APK at ~58 KB. Design tokens live in `Palette`, focus behaviour in `FocusSurface`, and the app card in
+`AppCardView`, so Home and the app library share one look without growing `MainActivity` further.
 
 | Concern | Implementation |
 |---|---|
 | App discovery | `PackageManager.queryIntentActivities` for both launcher categories, deduped, sorted by label |
 | Home list | `ScrollView` → vertical `LinearLayout`; rows are `HorizontalScrollView` + `LinearLayout` |
-| App grid | 7 tiles per row, weight-based, inside a `ScrollView` (no `GridView` focus quirks) |
-| Focus | Framework focus traversal + `OnFocusChangeListener` that swaps a rounded `GradientDrawable` and animates scale |
+| App grid | 7 tiles per row, weight-based, inside a `ScrollView` (no `GridView` focus quirks); same `AppCardView` as Home |
+| Home shelves | Fixed card width — eight across the content width — so short rows keep the same card size; rows scroll only beyond that |
+| Focus | `FocusSurface`: 2 dp accent ring, `card-hi` fill, 1.03 scale and 10 dp elevation; the rest background is captured and restored exactly on blur |
 | Quick panel | `FrameLayout` overlay: scrim + right sheet, `translationX` animation |
 | Sleep | `DevicePolicyManager.lockNow()` with a minimal `force-lock` device admin |
 | Power | dialog → `su 0 sh -c reboot` / `reboot -p`, system-settings fallback |
@@ -244,6 +246,10 @@ AstraLauncher/
 │       └── src/main/
 │           ├── AndroidManifest.xml
 │           ├── java/com/astra/launcher/MainActivity.java
+│           ├── java/com/astra/launcher/Palette.java       # tokens + shared drawables
+│           ├── java/com/astra/launcher/FocusSurface.java   # focus ring/scale, rest restore
+│           ├── java/com/astra/launcher/AppCardView.java    # Home/library app card
+│           ├── java/com/astra/launcher/SaverView.java
 │           └── res/values/{colors,styles}.xml, res/drawable/banner.xml
 ├── prototype/index.html          # D-pad-navigable HTML prototype
 └── docs/screenshots/             # concept, prototype and on-device captures

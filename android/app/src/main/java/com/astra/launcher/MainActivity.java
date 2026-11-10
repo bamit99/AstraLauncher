@@ -50,7 +50,6 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewOutlineProvider;
 import android.view.Window;
 import android.view.WindowManager;
 import android.view.animation.DecelerateInterpolator;
@@ -81,16 +80,23 @@ import java.util.Set;
 
 public class MainActivity extends Activity {
 
-    private static final int BG = 0xFF0B0D10;
-    private static final int RAISED = 0xFF12151B;
-    private static final int CARD = 0xFF1A1F27;
-    private static final int CARD_HI = 0xFF212734;
-    private static final int LINE = 0xFF252B36;
-    private static final int TX = 0xFFF5F7FA;
-    private static final int TX2 = 0xFFA9B2C3;
-    private static final int TX3 = 0xFF6F7A8C;
-    private static final int ACCENT = 0xFF7CC4FF;
-    private static final int ACCENT_SOFT = 0x2E7CC4FF;
+    private static final int BG = Palette.BG;
+    private static final int RAISED = Palette.RAISED;
+    private static final int CARD = Palette.CARD;
+    private static final int CARD_HI = Palette.CARD_HI;
+    private static final int LINE = Palette.LINE;
+    private static final int TX = Palette.TX;
+    private static final int TX2 = Palette.TX2;
+    private static final int TX3 = Palette.TX3;
+    private static final int ACCENT = Palette.ACCENT;
+    private static final int ACCENT_SOFT = Palette.ACCENT_SOFT;
+
+    /** App grid columns on the library screen. */
+    private static final int GRID_COLS = 7;
+    /** Home shelves are laid out for this many cards; short rows share the same card size. */
+    private static final int HOME_CARDS = 8;
+    private static final int CARD_W = 170;
+    private static final int CARD_H = 104;
 
     private static final String[] PINNED = {
             "org.smarttube.stable", "com.stremio.one", "com.plexapp.android",
@@ -108,6 +114,7 @@ public class MainActivity extends Activity {
     private LinearLayout panel;
     private View panelScrim;
     private TextView clockView;
+    private TextView dateView;
     private EditText searchInput;
     private ListView searchList;
     private List<AppEntry> apps = new ArrayList<>();
@@ -254,8 +261,12 @@ public class MainActivity extends Activity {
     };
 
     private void tickClock() {
+        Date now = new Date();
         if (clockView != null) {
-            clockView.setText(new SimpleDateFormat(clockPattern(), Locale.getDefault()).format(new Date()));
+            clockView.setText(new SimpleDateFormat(clockPattern(), Locale.getDefault()).format(now));
+        }
+        if (dateView != null) {
+            dateView.setText(new SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(now));
         }
         updateNetwork();
     }
@@ -801,7 +812,7 @@ public class MainActivity extends Activity {
             tile.addView(check, clp);
         }
 
-        tile.setOnFocusChangeListener((v, f) -> applyFocus(v, f, 16));
+        FocusSurface.attach(tile, 16);
         tile.setOnClickListener(v -> {
             prefs.edit().putLong("home_photo_id", photoIds.get(index)).apply();
             applyHomeWallpaper();
@@ -849,7 +860,7 @@ public class MainActivity extends Activity {
         row.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1f));
         row.addView(text(value, 14, ACCENT, Typeface.NORMAL));
 
-        row.setOnFocusChangeListener((v, f) -> applyFocus(v, f, 14));
+        FocusSurface.attach(row, Palette.RADIUS_ROW);
         if (keys != null) row.setOnKeyListener(keys);
         if (click != null) row.setOnClickListener(click);
         return row;
@@ -1116,7 +1127,7 @@ public class MainActivity extends Activity {
 
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
-        col.setPadding(dp(64), dp(30), dp(64), dp(24));
+        col.setPadding(dp(64), dp(32), dp(64), dp(24));
         scroll.addView(col, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -1160,7 +1171,7 @@ public class MainActivity extends Activity {
         heroCol.addView(sub, slp);
 
         TextView resume = text("▶  Open", 13, ACCENT, Typeface.BOLD);
-        resume.setBackground(rounded(ACCENT_SOFT, 999, 0x667CC4FF, 1));
+        resume.setBackground(rounded(ACCENT_SOFT, 999, Palette.ACCENT_LINE, 1));
         resume.setPadding(dp(16), dp(9), dp(16), dp(9));
         LinearLayout.LayoutParams rlp = wrap();
         rlp.topMargin = dp(10);
@@ -1170,7 +1181,7 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         final AppEntry heroTarget = heroApp;
-        hero.setOnFocusChangeListener((v, f) -> applyFocus(v, f, 20));
+        FocusSurface.attach(hero, Palette.RADIUS_CARD);
         hero.setOnClickListener(v -> {
             if (heroTarget != null) launch(heroTarget);
             else showApps();
@@ -1190,7 +1201,7 @@ public class MainActivity extends Activity {
         for (String pkg : pins) {
             AppEntry e = byPkg(pkg);
             if (e == null) continue;
-            View tile = appTile(e, true);
+            View tile = appTile(e);
             pinnedRow.addView(tile);
             if (first) { homeFirstFocus = tile; first = false; }
         }
@@ -1215,13 +1226,13 @@ public class MainActivity extends Activity {
         for (AppEntry e : apps) {
             if (count >= 8) break;
             if (!isMedia(e.pkg)) continue;
-            mediaRow.addView(appTile(e, true));
+            mediaRow.addView(appTile(e));
             count++;
         }
         if (count == 0) {
             for (AppEntry e : apps) {
                 if (count >= 8) break;
-                mediaRow.addView(appTile(e, true));
+                mediaRow.addView(appTile(e));
                 count++;
             }
         }
@@ -1241,7 +1252,7 @@ public class MainActivity extends Activity {
         for (AppEntry e : apps) {
             if (tools >= 8) break;
             if (!isTool(e)) continue;
-            toolsRow.addView(appTile(e, true));
+            toolsRow.addView(appTile(e));
             tools++;
         }
         if (tools > 0) {
@@ -1294,24 +1305,33 @@ public class MainActivity extends Activity {
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(46)));
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
 
         View dot = new View(this);
         dot.setBackground(rounded(ACCENT, 999, 0, 0));
-        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(dp(18), dp(18));
-        dlp.rightMargin = dp(10);
+        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(dp(8), dp(8));
+        dlp.rightMargin = dp(11);
         bar.addView(dot, dlp);
 
         TextView brand = text("Astra", 20, TX, Typeface.BOLD);
+        brand.setLetterSpacing(0.01f);
         bar.addView(brand);
 
         View spacer = new View(this);
         bar.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1f));
 
-        clockView = text("--:--", 14, TX2, Typeface.NORMAL);
-        bar.addView(clockView);
+        dateView = text("", 12, TX3, Typeface.NORMAL);
+        dateView.setLetterSpacing(0.02f);
+        bar.addView(dateView);
 
-        sysView = text("", 12, TX3, Typeface.NORMAL);
+        clockView = text("--:--", 15, TX2, Typeface.NORMAL);
+        clockView.setLetterSpacing(0.01f);
+        LinearLayout.LayoutParams clp = wrap();
+        clp.leftMargin = dp(10);
+        bar.addView(clockView, clp);
+
+        sysView = text("", 11, TX3, Typeface.NORMAL);
+        sysView.setLetterSpacing(0.01f);
         LinearLayout.LayoutParams wlp = wrap();
         wlp.leftMargin = dp(18);
         bar.addView(sysView, wlp);
@@ -1324,7 +1344,7 @@ public class MainActivity extends Activity {
 
         panelTrigger = glyphButton("≡", v -> showPanel());
         LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(dp(40), dp(40));
-        plp.leftMargin = dp(10);
+        plp.leftMargin = dp(8);
         bar.addView(panelTrigger, plp);
 
         tickClock();
@@ -1337,24 +1357,24 @@ public class MainActivity extends Activity {
         row.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = dp(20);
-        lp.bottomMargin = dp(10);
+        lp.topMargin = dp(26);
+        lp.bottomMargin = dp(12);
         row.setLayoutParams(lp);
 
         TextView t = text(title, 12, TX3, Typeface.BOLD);
-        t.setLetterSpacing(0.16f);
+        t.setLetterSpacing(0.18f);
         row.addView(t);
 
         View line = new View(this);
         line.setBackgroundColor(LINE);
         LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(0, dp(1), 1f);
-        llp.leftMargin = dp(14);
+        llp.leftMargin = dp(16);
         row.addView(line, llp);
 
         if (!TextUtils.isEmpty(meta)) {
             TextView m = text(meta, 12, TX3, Typeface.NORMAL);
             LinearLayout.LayoutParams mlp = wrap();
-            mlp.leftMargin = dp(12);
+            mlp.leftMargin = dp(14);
             row.addView(m, mlp);
         }
         return row;
@@ -1371,11 +1391,12 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Size a home row so a whole number of cards ends exactly at the right margin.
+     * Size a Home row's cards identically, whatever the row contains.
      *
-     * <p>Fixed-width cards plus a fixed gap left a partial card clipped by the row viewport,
-     * which reads as a chopped edge on a TV. Cards shrink only as far as 120 dp; beyond that
-     * the row scrolls, and the clip lands in the gap between cards.
+     * <p>Every shelf is laid out for the same number of cards across the content width, so a row
+     * with five items shows the same card size as a row with eight and simply ends earlier. Rows
+     * longer than that keep the width and scroll, so the clip always lands in the gap between
+     * cards instead of through one.
      */
     private void fitRow(LinearLayout row) {
         int n = row.getChildCount();
@@ -1383,13 +1404,9 @@ public class MainActivity extends Activity {
 
         int avail = getResources().getDisplayMetrics().widthPixels - dp(128);
         int gap = dp(14);
-        int minW = dp(120);
-        int maxW = dp(170);
+        // Same card size on every row; a short row simply leaves empty slots at the right margin.
+        int width = (avail - (HOME_CARDS - 1) * gap) / HOME_CARDS;
 
-        int visible = n;
-        while (visible > 1 && (avail - (visible - 1) * gap) / visible < minW) visible--;
-
-        int width = Math.min((avail - (visible - 1) * gap) / visible, maxW);
         for (int i = 0; i < n; i++) {
             View v = row.getChildAt(i);
             ViewGroup.LayoutParams raw = v.getLayoutParams();
@@ -1401,45 +1418,15 @@ public class MainActivity extends Activity {
         }
     }
 
-    private View appTile(AppEntry e, boolean withIcon) {
-        LinearLayout tile = new LinearLayout(this);
-        tile.setOrientation(LinearLayout.VERTICAL);
-        tile.setGravity(Gravity.CENTER);
-        tile.setPadding(dp(8), dp(12), dp(8), dp(10));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(170), dp(104));
+    private View appTile(AppEntry e) {
+        AppCardView card = new AppCardView(this);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(CARD_W), dp(CARD_H));
         lp.rightMargin = dp(14);
-        tile.setLayoutParams(lp);
-        tile.setBackground(rounded(CARD, 18, LINE, 1));
-        tile.setFocusable(true);
-
-        if (withIcon && e.icon != null) {
-            ImageView iv = new ImageView(this);
-            iv.setImageDrawable(e.icon);
-            roundedOutline(iv, 10);
-            LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(38), dp(38));
-            tile.addView(iv, ilp);
-        } else {
-            TextView g = text("▶", 20, ACCENT, Typeface.BOLD);
-            g.setGravity(Gravity.CENTER);
-            g.setBackground(rounded(CARD_HI, 10, LINE, 1));
-            LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(dp(38), dp(38));
-            tile.addView(g, glp);
-        }
-
-        TextView label = text(e.label, 13, TX2, Typeface.NORMAL);
-        label.setSingleLine(true);
-        label.setEllipsize(TextUtils.TruncateAt.END);
-        label.setGravity(Gravity.CENTER);
-        label.setPadding(dp(4), dp(7), dp(4), 0);
-        tile.addView(label, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        tile.setContentDescription(e.label);
-        tile.setTag(e.pkg);
-
-        tile.setOnFocusChangeListener((v, f) -> applyFocus(v, f, 18));
-        tile.setOnClickListener(v -> launch(e));
-        tile.setOnLongClickListener(v -> { showAppMenu(v, e); return true; });
-        return tile;
+        card.setLayoutParams(lp);
+        card.setApp(e.label, e.pkg, e.icon);
+        card.setOpen(() -> launch(e));
+        card.setMenu(() -> showAppMenu(card, e));
+        return card;
     }
 
     private View actionTile(String label, String glyph, Runnable action) {
@@ -1447,23 +1434,24 @@ public class MainActivity extends Activity {
         tile.setOrientation(LinearLayout.VERTICAL);
         tile.setGravity(Gravity.CENTER);
         tile.setPadding(dp(8), dp(12), dp(8), dp(10));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(170), dp(104));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(CARD_W), dp(CARD_H));
         lp.rightMargin = dp(14);
         tile.setLayoutParams(lp);
-        tile.setBackground(rounded(CARD, 18, LINE, 1));
+        tile.setBackground(rounded(CARD, Palette.RADIUS_CARD, LINE, 1));
         tile.setFocusable(true);
 
         TextView g = text(glyph, 20, ACCENT, Typeface.BOLD);
         g.setGravity(Gravity.CENTER);
         g.setBackground(rounded(CARD_HI, 10, LINE, 1));
-        tile.addView(g, new LinearLayout.LayoutParams(dp(38), dp(38)));
+        tile.addView(g, new LinearLayout.LayoutParams(dp(40), dp(40)));
 
         TextView name = text(label, 13, TX2, Typeface.NORMAL);
         name.setGravity(Gravity.CENTER);
-        name.setPadding(0, dp(7), 0, 0);
+        name.setPadding(0, dp(8), 0, 0);
         tile.addView(name);
 
-        tile.setOnFocusChangeListener((v, f) -> applyFocus(v, f, 18));
+        FocusSurface.attach(tile, Palette.RADIUS_CARD,
+                (v, focused) -> name.setTextColor(focused ? TX : TX2));
         tile.setOnClickListener(v -> action.run());
         tile.setContentDescription(label);
         return tile;
@@ -1523,23 +1511,23 @@ public class MainActivity extends Activity {
 
         List<AppEntry> data = categoryApps();
         final View[] firstTile = new View[1];
-        for (int i = 0; i < data.size(); i += 7) {
+        for (int i = 0; i < data.size(); i += GRID_COLS) {
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            rlp.bottomMargin = dp(14);
+            rlp.bottomMargin = dp(16);
             row.setLayoutParams(rlp);
-            for (int j = 0; j < 7; j++) {
+            for (int j = 0; j < GRID_COLS; j++) {
                 int p = i + j;
                 if (p >= data.size()) {
                     View filler = new View(this);
                     row.addView(filler, new LinearLayout.LayoutParams(0, 1, 1f));
                     continue;
                 }
-                View tile = appTile(data.get(p), true);
-                LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(0, dp(112), 1f);
-                tl.rightMargin = j < 6 ? dp(14) : 0;
+                View tile = appTile(data.get(p));
+                LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(0, dp(CARD_H), 1f);
+                tl.rightMargin = j < GRID_COLS - 1 ? dp(14) : 0;
                 tile.setLayoutParams(tl);
                 row.addView(tile);
                 if (firstTile[0] == null) firstTile[0] = tile;
@@ -1581,10 +1569,10 @@ public class MainActivity extends Activity {
     private TextView chipView(String label, boolean active) {
         TextView c = text(label, 13, active ? ACCENT : TX2, Typeface.BOLD);
         c.setBackground(rounded(active ? ACCENT_SOFT : RAISED, 999,
-                active ? 0x667CC4FF : LINE, 1));
+                active ? Palette.ACCENT_LINE : LINE, 1));
         c.setPadding(dp(18), dp(9), dp(18), dp(9));
         c.setFocusable(true);
-        c.setOnFocusChangeListener((v, f) -> applyFocus(v, f, 999));
+        FocusSurface.attachPill(c, Palette.RADIUS_PILL);
         return c;
     }
 
@@ -1668,7 +1656,7 @@ public class MainActivity extends Activity {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(14), dp(12), dp(14), dp(12));
         row.setFocusable(true);
-        row.setOnFocusChangeListener((v, f) -> applyFocus(v, f, 14));
+        FocusSurface.attach(row, Palette.RADIUS_ROW);
 
         ImageView iv = new ImageView(this);
         iv.setImageDrawable(e.icon);
@@ -1819,7 +1807,7 @@ public class MainActivity extends Activity {
         row.addView(col, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        row.setOnFocusChangeListener((view, f) -> applyFocus(view, f, 12));
+        FocusSurface.attach(row, 12);
         row.setOnClickListener(view -> {
             hidePanel(false);
             if (action != null) {
@@ -1967,9 +1955,9 @@ public class MainActivity extends Activity {
         TextView t = text(label, 16, primary ? ACCENT : TX, primary ? Typeface.BOLD : Typeface.NORMAL);
         t.setGravity(Gravity.CENTER);
         t.setBackground(rounded(primary ? ACCENT_SOFT : CARD, 14,
-                primary ? 0x667CC4FF : LINE, 1));
+                primary ? Palette.ACCENT_LINE : LINE, 1));
         t.setFocusable(true);
-        t.setOnFocusChangeListener((v, f) -> applyFocus(v, f, 14));
+        FocusSurface.attachPill(t, Palette.RADIUS_ROW);
         return t;
     }
 
@@ -2143,32 +2131,14 @@ public class MainActivity extends Activity {
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
     }
 
-    private void applyFocus(View v, boolean focused, float radius) {
-        v.setBackground(rounded(focused ? CARD_HI : CARD, radius,
-                focused ? ACCENT : LINE, focused ? 2 : 1));
-        v.animate().scaleX(focused ? 1.03f : 1f)
-                .scaleY(focused ? 1.03f : 1f)
-                .setDuration(focused ? 160 : 120)
-                .setInterpolator(new DecelerateInterpolator())
-                .start();
-        if (v.getParent() instanceof View) v.setElevation(focused ? dp(10) : 0);
-    }
-
     private TextView glyphButton(String glyph, View.OnClickListener click) {
         TextView t = text(glyph, 20, TX2, Typeface.NORMAL);
         t.setGravity(Gravity.CENTER);
         t.setBackground(rounded(0x00000000, 12, 0x00000000, 0));
         t.setFocusable(true);
-        t.setOnFocusChangeListener((v, f) -> applyFocusButton(v, f));
+        FocusSurface.attachPill(t, 12, (v, focused) -> t.setTextColor(focused ? TX : TX2));
         t.setOnClickListener(click);
         return t;
-    }
-
-    private void applyFocusButton(View v, boolean focused) {
-        v.setBackground(rounded(focused ? ACCENT_SOFT : 0x00000000, 12,
-                focused ? 0x667CC4FF : 0x00000000, 1));
-        v.animate().scaleX(focused ? 1.06f : 1f).scaleY(focused ? 1.06f : 1f)
-                .setDuration(140).start();
     }
 
     private TextView text(String s, float sp, int color, int style) {
@@ -2207,12 +2177,7 @@ public class MainActivity extends Activity {
     }
 
     private void roundedOutline(View v, final float radiusDp) {
-        v.setClipToOutline(true);
-        v.setOutlineProvider(new ViewOutlineProvider() {
-            @Override public void getOutline(View view, android.graphics.Outline outline) {
-                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), dp(radiusDp));
-            }
-        });
+        Palette.clip(v, radiusDp);
     }
 
     private int dp(float v) {
