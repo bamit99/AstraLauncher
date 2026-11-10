@@ -11,9 +11,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.ContentUris;
 import android.content.SharedPreferences;
-import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
-import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -56,7 +54,6 @@ import android.view.animation.DecelerateInterpolator;
 import android.widget.BaseAdapter;
 import android.widget.EditText;
 import android.widget.FrameLayout;
-import android.widget.GridView;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -70,13 +67,9 @@ import java.io.FileReader;
 import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.Date;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 
 public class MainActivity extends Activity {
 
@@ -91,9 +84,7 @@ public class MainActivity extends Activity {
     private static final int ACCENT = Palette.ACCENT;
     private static final int ACCENT_SOFT = Palette.ACCENT_SOFT;
 
-    /** App grid columns on the library screen. */
-    private static final int GRID_COLS = 7;
-    /** Home shelves are laid out for this many cards; short rows share the same card size. */
+    /** Home shelves and the library grid share this many cards across the content width. */
     private static final int HOME_CARDS = 8;
     private static final int CARD_W = 170;
     private static final int CARD_H = 104;
@@ -117,6 +108,7 @@ public class MainActivity extends Activity {
     private TextView dateView;
     private EditText searchInput;
     private ListView searchList;
+    private final AppRepository repo = new AppRepository();
     private List<AppEntry> apps = new ArrayList<>();
     private List<AppEntry> filterSource = new ArrayList<>();
     private List<String> pins = new ArrayList<>();
@@ -131,9 +123,8 @@ public class MainActivity extends Activity {
     private TextView searchEmpty;
     private View homeFirstFocus;
     private View panelTrigger;
-    private int category = 0;
-    private BaseAdapter gridAdapter;
-    private List<AppEntry> gridData = new ArrayList<>();
+    private String category = "all";
+    private boolean usageAccess;
     private boolean panelOpen = false;
     private boolean searchOpen = false;
     private String screen = "home";
@@ -155,16 +146,6 @@ public class MainActivity extends Activity {
     private long photosSignature = -1;
 
 
-    /* ------------------------------------------------------------------ */
-    /* App model                                                          */
-    /* ------------------------------------------------------------------ */
-    static class AppEntry {
-        String label;
-        String pkg;
-        Drawable icon;
-        Intent intent;
-    }
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -172,7 +153,6 @@ public class MainActivity extends Activity {
         getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
-        apps = loadApps(getPackageManager());
         prefs = getSharedPreferences("astra", MODE_PRIVATE);
         pins = loadPins();
 
@@ -201,6 +181,23 @@ public class MainActivity extends Activity {
 
         buildHome();
         setContentView(root);
+        usageAccess = AppRepository.hasUsageAccess(this);
+        loadApps(false);
+    }
+
+    /**
+     * Resolve the installed apps off the UI thread and repaint whatever screen is showing.
+     * The first load replaces the "Loading apps" placeholder; a manual refresh keeps the flow.
+     */
+    private void loadApps(boolean force) {
+        repo.load(this, force, () -> {
+            apps = new ArrayList<>(repo.apps());
+            pins = loadPins();
+            if ("apps".equals(screen)) showApps();
+            else if ("settings".equals(screen) || "picker".equals(screen)) { /* leave dialogs alone */ }
+            else if ("home".equals(screen)) buildHome();
+            if (searchOpen) filterApps(searchInput == null ? "" : searchInput.getText().toString());
+        });
     }
 
     @Override
@@ -213,6 +210,12 @@ public class MainActivity extends Activity {
         handler.post(sysTick);
         resetIdle();
         if ("photos".equals(prefs.getString("wallpaper", "astra"))) loadPhotos();
+        if ("settings".equals(screen)) showSettings();
+        boolean usage = AppRepository.hasUsageAccess(this);
+        if (usage != usageAccess) {
+            usageAccess = usage;
+            loadApps(true);
+        }
     }
 
     @Override
@@ -600,7 +603,7 @@ public class MainActivity extends Activity {
         slp.topMargin = dp(4);
         col.addView(sub, slp);
 
-        final View[] rows = new View[8];
+        final View[] rows = new View[9];
 
         // Screensaver timeout
         final int min = saverMinutes();
@@ -652,31 +655,45 @@ public class MainActivity extends Activity {
                     return true;
                 }, null);
 
+        // Recently used — needs the system usage-access app-op, so it is explicit and optional.
+        final boolean usage = AppRepository.hasUsageAccess(this);
+        rows[4] = settingRow("Recently used apps", usage ? "On" : "Needs access", null, v -> {
+            settingsIndex = 4;
+            try {
+                startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS));
+            } catch (ActivityNotFoundException ex) {
+                toast("No usage access screen on this device");
+            }
+        });
+
         // Home photo
         int chosen = photoIds.indexOf(prefs.getLong("home_photo_id", -1L));
         String photoLabel = chosen >= 0 ? photoNames.get(chosen)
                 : (photoIds.isEmpty() ? "\u2014" : "First photo");
-        rows[4] = settingRow("Home photo", photoLabel, null, v -> showPhotoPicker());
+        rows[5] = settingRow("Home photo", photoLabel, null, v -> {
+            settingsIndex = 5;
+            showPhotoPicker();
+        });
 
         // Home card
         final boolean homeCard = prefs.getBoolean("home_card", false);
-        rows[5] = settingRow("Home card", homeCard ? "On" : "Off", (v, code, e) -> {
+        rows[6] = settingRow("Home card", homeCard ? "On" : "Off", (v, code, e) -> {
             if (e.getAction() != KeyEvent.ACTION_DOWN) return false;
             if (code != KeyEvent.KEYCODE_DPAD_LEFT && code != KeyEvent.KEYCODE_DPAD_RIGHT) return false;
             prefs.edit().putBoolean("home_card", !homeCard).apply();
-            settingsIndex = 5;
+            settingsIndex = 6;
             showSettings();
             return true;
         }, null);
 
         // Preview
-        rows[6] = settingRow("Preview screensaver", "Start now", null, v -> {
-            settingsIndex = 6;
+        rows[7] = settingRow("Preview screensaver", "Start now", null, v -> {
+            settingsIndex = 7;
             showScreensaver();
         });
 
         // Reset
-        rows[7] = settingRow("Reset preferences", "Restore defaults", null, v -> {
+        rows[8] = settingRow("Reset preferences", "Restore defaults", null, v -> {
             prefs.edit()
                     .remove("saver_minutes")
                     .remove("saver_style")
@@ -685,7 +702,7 @@ public class MainActivity extends Activity {
                     .remove("home_card")
                     .remove("home_photo_id")
                     .apply();
-            settingsIndex = 7;
+            settingsIndex = 8;
             toast("Preferences reset");
             showSettings();
         });
@@ -1006,10 +1023,12 @@ public class MainActivity extends Activity {
     }
 
     private void refreshApps() {
-        apps = loadApps(getPackageManager());
         pins = loadPins();
-        toast("App list refreshed");
-        if ("apps".equals(screen)) showApps(); else buildHome();
+        repo.load(this, true, () -> {
+            apps = new ArrayList<>(repo.apps());
+            toast("App list refreshed");
+            if ("apps".equals(screen)) showApps(); else buildHome();
+        });
     }
 
     @Override
@@ -1029,52 +1048,9 @@ public class MainActivity extends Activity {
     /* ------------------------------------------------------------------ */
     /* App loading                                                        */
     /* ------------------------------------------------------------------ */
-    private List<AppEntry> loadApps(PackageManager pm) {
-        List<AppEntry> out = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
-        collect(pm, Intent.CATEGORY_LEANBACK_LAUNCHER, out, seen);
-        collect(pm, Intent.CATEGORY_LAUNCHER, out, seen);
-        Collections.sort(out, new Comparator<AppEntry>() {
-            @Override public int compare(AppEntry a, AppEntry b) {
-                return a.label.compareToIgnoreCase(b.label);
-            }
-        });
-        filterSource = new ArrayList<>(out);
-        return out;
-    }
-
-    private void collect(PackageManager pm, String category, List<AppEntry> out, Set<String> seen) {
-        Intent probe = new Intent(Intent.ACTION_MAIN).addCategory(category);
-        List<ResolveInfo> list = pm.queryIntentActivities(probe, 0);
-        for (ResolveInfo ri : list) {
-            ApplicationInfo ai = ri.activityInfo.applicationInfo;
-            if (ai == null || getPackageName().equals(ai.packageName)) continue;
-            if (seen.contains(ai.packageName)) continue;
-            seen.add(ai.packageName);
-            AppEntry e = new AppEntry();
-            e.pkg = ai.packageName;
-            e.label = String.valueOf(ri.loadLabel(pm));
-            e.icon = ri.loadIcon(pm);
-            Intent i = new Intent(Intent.ACTION_MAIN);
-            i.addCategory(category);
-            i.setComponent(new ComponentName(ri.activityInfo.packageName, ri.activityInfo.name));
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            e.intent = i;
-            out.add(e);
-        }
-    }
-
+    /** Resolve the cached list by package (the repository is the source of truth). */
     private AppEntry byPkg(String pkg) {
-        for (AppEntry e : apps) if (e.pkg.equals(pkg)) return e;
-        return null;
-    }
-
-    private boolean isMedia(String pkg) {
-        String p = pkg.toLowerCase(Locale.ROOT);
-        String[] keys = {"stremio", "plex", "smarttube", "youtube", "netflix", "prime",
-                "amazonvideo", "disney", "vlc", "kodi", "spotify", "jellyfin", "emby", "mediacenter"};
-        for (String k : keys) if (p.contains(k)) return true;
-        return false;
+        return repo.byPackage(pkg);
     }
 
     /* ------------------------------------------------------------------ */
@@ -1118,6 +1094,7 @@ public class MainActivity extends Activity {
     private void buildHome() {
         contentHost.removeAllViews();
         screen = "home";
+        homeFirstFocus = null;
         applyHomeWallpaper();
 
         ScrollView scroll = new ScrollView(this);
@@ -1132,6 +1109,15 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         col.addView(buildTopBar());
+
+        if (!repo.isLoaded()) {
+            TextView loading = text("Loading apps\u2026", 15, TX3, Typeface.NORMAL);
+            LinearLayout.LayoutParams llp = wrap();
+            llp.topMargin = dp(40);
+            col.addView(loading, llp);
+            contentHost.addView(scroll, match());
+            return;
+        }
 
         // Hero / quick-start card is opt-in: the pinned row already covers launch targets.
         boolean showCard = prefs.getBoolean("home_card", false);
@@ -1217,48 +1203,33 @@ public class MainActivity extends Activity {
         fitRow(pinnedRow);
         col.addView(hscroll(pinnedRow));
 
-        // Streaming row
-        col.addView(sectionHeader("STREAMING & MEDIA", ""));
+        // Media row — the media category. It intentionally overlaps PINNED: that row is a
+        // shortcut shelf, this one is the category. Phase 4 decides whether both stay.
+        List<AppEntry> media = repo.category(AppRepository.Category.MEDIA);
+        col.addView(sectionHeader("STREAMING & MEDIA",
+                media.size() > HOME_CARDS ? HOME_CARDS + " of " + media.size() : ""));
         LinearLayout mediaRow = new LinearLayout(this);
         mediaRow.setOrientation(LinearLayout.HORIZONTAL);
         mediaRow.setPadding(0, dp(2), 0, dp(6));
-        int count = 0;
-        for (AppEntry e : apps) {
-            if (count >= 8) break;
-            if (!isMedia(e.pkg)) continue;
-            mediaRow.addView(appTile(e));
-            count++;
-        }
-        if (count == 0) {
-            for (AppEntry e : apps) {
-                if (count >= 8) break;
-                mediaRow.addView(appTile(e));
-                count++;
-            }
+        for (int i = 0; i < media.size() && i < HOME_CARDS; i++) {
+            mediaRow.addView(appTile(media.get(i)));
         }
         fitRow(mediaRow);
         col.addView(hscroll(mediaRow));
 
-        // Tools row — utilities and anything that is not media
-        LinearLayout toolsRow = new LinearLayout(this);
-        toolsRow.setOrientation(LinearLayout.HORIZONTAL);
-        toolsRow.setPadding(0, dp(2), 0, dp(6));
-        int toolTotal = 0;
-        for (AppEntry e : apps) {
-            if (!isTool(e)) continue;
-            toolTotal++;
-        }
-        int tools = 0;
-        for (AppEntry e : apps) {
-            if (tools >= 8) break;
-            if (!isTool(e)) continue;
-            toolsRow.addView(appTile(e));
-            tools++;
-        }
-        if (tools > 0) {
-            col.addView(sectionHeader("TOOLS", toolTotal > tools ? tools + " of " + toolTotal : ""));
-            fitRow(toolsRow);
-            col.addView(hscroll(toolsRow));
+        // Apps row — everything that is not media and not already pinned.
+        List<AppEntry> others = otherApps();
+        if (!others.isEmpty()) {
+            col.addView(sectionHeader("APPS",
+                    others.size() > HOME_CARDS ? HOME_CARDS + " of " + others.size() : ""));
+            LinearLayout appsRow = new LinearLayout(this);
+            appsRow.setOrientation(LinearLayout.HORIZONTAL);
+            appsRow.setPadding(0, dp(2), 0, dp(6));
+            for (int i = 0; i < others.size() && i < HOME_CARDS; i++) {
+                appsRow.addView(appTile(others.get(i)));
+            }
+            fitRow(appsRow);
+            col.addView(hscroll(appsRow));
         }
 
         contentHost.addView(scroll, match());
@@ -1269,14 +1240,42 @@ public class MainActivity extends Activity {
         return pins.contains(pkg);
     }
 
+    /**
+     * Everything that is neither media nor already pinned, for the APPS row. Vendor diagnostics
+     * ("System Tracing", "System Update") stay in the library's System section only.
+     */
+    private List<AppEntry> otherApps() {
+        List<AppEntry> out = new ArrayList<>();
+        for (AppEntry e : apps) {
+            if (e.category == AppRepository.Category.MEDIA) continue;
+            if (pins.contains(e.pkg)) continue;
+            if (e.category == AppRepository.Category.SYSTEM
+                    && e.label.toLowerCase(Locale.ROOT).startsWith("system ")) continue;
+            out.add(e);
+        }
+        return out;
+    }
+
+    /**
+     * Pinned packages, as stored. This intentionally does not filter against the app list: pins are
+     * loaded before the repository finishes on a cold start, and dropping them there would erase a
+     * user's pins. Rendering resolves each package against the repository instead.
+     */
     private List<String> loadPins() {
         String raw = prefs.getString("pins", null);
-        List<String> out = new ArrayList<>();
         if (raw == null) {
-            for (String p : PINNED) if (byPkg(p) != null) out.add(p);
-            savePins(out);
-        } else if (!raw.isEmpty()) {
-            for (String p : raw.split(",")) if (byPkg(p) != null) out.add(p);
+            List<String> seed = new ArrayList<>();
+            if (repo.isLoaded()) {
+                for (String p : PINNED) if (byPkg(p) != null) seed.add(p);
+                savePins(seed);
+            } else {
+                for (String p : PINNED) seed.add(p);
+            }
+            return seed;
+        }
+        List<String> out = new ArrayList<>();
+        if (!raw.isEmpty()) {
+            for (String p : raw.split(",")) if (!p.isEmpty()) out.add(p);
         }
         return out;
     }
@@ -1285,19 +1284,10 @@ public class MainActivity extends Activity {
         prefs.edit().putString("pins", TextUtils.join(",", list)).apply();
     }
 
-    /** Utilities for the Tools row: no media, no launcher, no vendor diagnostic noise. */
-    private boolean isTool(AppEntry e) {
-        if (e.pkg.equals(getPackageName())) return false;
-        if (isMedia(e.pkg)) return false;
-        String label = e.label.toLowerCase(Locale.ROOT);
-        if (label.startsWith("system ")) return false;
-        if (label.equals("all apps")) return false;
-        return true;
-    }
 
     private AppEntry firstMedia() {
-        for (AppEntry e : apps) if (isMedia(e.pkg)) return e;
-        return apps.isEmpty() ? null : apps.get(0);
+        AppEntry media = repo.firstMedia();
+        return media != null ? media : (apps.isEmpty() ? null : apps.get(0));
     }
 
     private View buildTopBar() {
@@ -1402,10 +1392,9 @@ public class MainActivity extends Activity {
         int n = row.getChildCount();
         if (n == 0) return;
 
-        int avail = getResources().getDisplayMetrics().widthPixels - dp(128);
         int gap = dp(14);
         // Same card size on every row; a short row simply leaves empty slots at the right margin.
-        int width = (avail - (HOME_CARDS - 1) * gap) / HOME_CARDS;
+        int width = cardWidth();
 
         for (int i = 0; i < n; i++) {
             View v = row.getChildAt(i);
@@ -1416,6 +1405,12 @@ public class MainActivity extends Activity {
             lp.rightMargin = i == n - 1 ? 0 : gap;
             v.setLayoutParams(lp);
         }
+    }
+
+    /** Card width shared by Home shelves and the library grid: eight across the content width. */
+    private int cardWidth() {
+        int avail = getResources().getDisplayMetrics().widthPixels - dp(128);
+        return (avail - (HOME_CARDS - 1) * dp(14)) / HOME_CARDS;
     }
 
     private View appTile(AppEntry e) {
@@ -1482,9 +1477,23 @@ public class MainActivity extends Activity {
         head.addView(title);
         View spacer = new View(this);
         head.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1f));
-        TextView count = text(apps.size() + " installed", 13, TX3, Typeface.NORMAL);
+        List<AppEntry> data = categoryApps();
+
+        TextView count = text(!repo.isLoaded() ? "loading" : data.size() + " apps", 13, TX3,
+                Typeface.NORMAL);
         head.addView(count);
         col.addView(head);
+
+        // Chips only exist for sections that can be populated from real local data.
+        List<String> keys = new ArrayList<>();
+        List<String> labels = new ArrayList<>();
+        keys.add("all"); labels.add("All");
+        if (!pins.isEmpty()) { keys.add("fav"); labels.add("Favorites"); }
+        if (repo.hasRecent()) { keys.add("recent"); labels.add("Recently used"); }
+        keys.add("media"); labels.add("Media");
+        keys.add("tools"); labels.add("Tools");
+        keys.add("system"); labels.add("System");
+        if (!keys.contains(category)) category = "all";
 
         LinearLayout chips = new LinearLayout(this);
         chips.setOrientation(LinearLayout.HORIZONTAL);
@@ -1492,12 +1501,16 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         clp.topMargin = dp(16);
         chips.setLayoutParams(clp);
-        String[] names = {"All", "Media", "Tools", "System"};
-        for (int i = 0; i < names.length; i++) {
-            final int idx = i;
-            TextView chip = chipView(names[i], idx == category);
+        int activeChipId = View.NO_ID;
+        for (int i = 0; i < keys.size(); i++) {
+            final String key = keys.get(i);
+            boolean active = key.equals(category);
+            TextView chip = chipView(labels.get(i), active);
+            chip.setId(View.generateViewId());
+            chip.setContentDescription(labels.get(i) + (active ? ", selected" : ""));
+            if (active) activeChipId = chip.getId();
             chip.setOnClickListener(v -> {
-                category = idx;
+                category = key;
                 showApps();
             });
             LinearLayout.LayoutParams lp = wrap();
@@ -1509,16 +1522,24 @@ public class MainActivity extends Activity {
         View gap = new View(this);
         col.addView(gap, new LinearLayout.LayoutParams(1, dp(18)));
 
-        List<AppEntry> data = categoryApps();
+        if (!repo.isLoaded()) {
+            TextView loading = text("Loading apps\u2026", 16, TX3, Typeface.NORMAL);
+            LinearLayout.LayoutParams elp = wrap();
+            elp.topMargin = dp(24);
+            col.addView(loading, elp);
+            contentHost.addView(scroll, match());
+            return;
+        }
+
         final View[] firstTile = new View[1];
-        for (int i = 0; i < data.size(); i += GRID_COLS) {
+        for (int i = 0; i < data.size(); i += HOME_CARDS) {
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             rlp.bottomMargin = dp(16);
             row.setLayoutParams(rlp);
-            for (int j = 0; j < GRID_COLS; j++) {
+            for (int j = 0; j < HOME_CARDS; j++) {
                 int p = i + j;
                 if (p >= data.size()) {
                     View filler = new View(this);
@@ -1527,8 +1548,10 @@ public class MainActivity extends Activity {
                 }
                 View tile = appTile(data.get(p));
                 LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(0, dp(CARD_H), 1f);
-                tl.rightMargin = j < GRID_COLS - 1 ? dp(14) : 0;
+                tl.rightMargin = j < HOME_CARDS - 1 ? dp(14) : 0;
                 tile.setLayoutParams(tl);
+                // Up from the first row always lands on the active chip, not the nearest one.
+                if (i == 0 && activeChipId != View.NO_ID) tile.setNextFocusUpId(activeChipId);
                 row.addView(tile);
                 if (firstTile[0] == null) firstTile[0] = tile;
             }
@@ -1536,7 +1559,10 @@ public class MainActivity extends Activity {
         }
 
         if (data.isEmpty()) {
-            TextView empty = text("No apps in this category", 16, TX3, Typeface.NORMAL);
+            String msg = "recent".equals(category)
+                    ? "No recently used apps yet"
+                    : "fav".equals(category) ? "No pinned apps" : "No apps in this category";
+            TextView empty = text(msg, 16, TX3, Typeface.NORMAL);
             LinearLayout.LayoutParams elp = wrap();
             elp.topMargin = dp(24);
             col.addView(empty, elp);
@@ -1546,24 +1572,17 @@ public class MainActivity extends Activity {
         contentHost.post(() -> { if (firstTile[0] != null) firstTile[0].requestFocus(); });
     }
 
+    /** The selected library section, resolved from the cached repository snapshot. */
     private List<AppEntry> categoryApps() {
-        List<AppEntry> out = new ArrayList<>();
-        for (AppEntry e : apps) {
-            boolean system;
-            try {
-                system = (getPackageManager().getApplicationInfo(e.pkg, 0).flags
-                        & ApplicationInfo.FLAG_SYSTEM) != 0;
-            } catch (PackageManager.NameNotFoundException ex) {
-                system = false;
-            }
-            switch (category) {
-                case 1: if (isMedia(e.pkg)) out.add(e); break;
-                case 2: if (!system && !isMedia(e.pkg)) out.add(e); break;
-                case 3: if (system) out.add(e); break;
-                default: out.add(e);
-            }
+        if (!repo.isLoaded()) return new ArrayList<>();
+        switch (category) {
+            case "fav": return new ArrayList<>(repo.favorites(pins));
+            case "recent": return repo.recent();
+            case "media": return repo.category(AppRepository.Category.MEDIA);
+            case "tools": return repo.category(AppRepository.Category.TOOLS);
+            case "system": return repo.category(AppRepository.Category.SYSTEM);
+            default: return new ArrayList<>(apps);
         }
-        return out;
     }
 
     private TextView chipView(String label, boolean active) {

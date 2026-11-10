@@ -50,12 +50,12 @@ tasks. Astra is the opposite — an explicit, honest surface:
 | Concept | Prototype | On device |
 |---|---|---|
 | ![](docs/screenshots/01-concept-home.jpg) | ![](docs/screenshots/06-prototype-home.png) | ![](docs/screenshots/phase-1/01-home-rest.png) |
-| ![](docs/screenshots/02-concept-apps.jpg) | ![](docs/screenshots/07-prototype-apps.png) | ![](docs/screenshots/11-device-apps.png) |
+| ![](docs/screenshots/02-concept-apps.jpg) | ![](docs/screenshots/07-prototype-apps.png) | ![](docs/screenshots/phase-2/02-library-all.png) |
 | ![](docs/screenshots/03-concept-quick-panel.jpg) | ![](docs/screenshots/09-prototype-panel.png) | ![](docs/screenshots/16-device-panel-network.png) |
 | ![](docs/screenshots/04-concept-search.jpg) | ![](docs/screenshots/08-prototype-search.png) | ![](docs/screenshots/12-device-search.png) |
 
 - **Home** — pinned row, streaming/media row and a tools row, with a live system strip (throughput, CPU, RAM, free storage), today's date, clock, search and panel in the top bar. The quick-start card is opt-in (Settings → Home card, default off) because the pinned row already covers launch targets. Rows always end on a gap, never through a card.
-- **Apps** — category chips (All / Media / Tools / System), 7-column grid of every launchable app, long-press for a context menu (Open / Pin / Unpin / App info).
+- **Apps** — sections for **All**, **Favorites** (pinned, in pin order), **Recently used** (local usage stats, only after the user grants usage access), **Media**, **Tools** and **System**; an eight-across grid using the same card as Home; long-press for a context menu (Open / Pin / Unpin / App info). Category rules are documented in [docs/APP_CATEGORIES.md](docs/APP_CATEGORIES.md).
 - **Quick panel** — right sheet with live network and Ethernet state, date/time, HDMI, display, sound, storage, refresh app list, Astra settings, screensaver, sleep and power. Every row closes the panel when it acts.
 - **Search** — filters installed apps as you type, launches them, and shows an empty state when nothing matches.
 - **Screensaver / ambient** — after an idle delay: a thin clock over the Astra aurora or your own photo folder, optional pure-black mode; any key returns to the launcher.
@@ -126,9 +126,10 @@ APK at ~58 KB. Design tokens live in `Palette`, focus behaviour in `FocusSurface
 
 | Concern | Implementation |
 |---|---|
-| App discovery | `PackageManager.queryIntentActivities` for both launcher categories, deduped, sorted by label |
+| App discovery | `AppRepository`: both launcher categories deduped and sorted on a worker thread, categories and local recency resolved once per load; screens read immutable snapshots |
+| Categories | one rule — media package token, else preinstalled = system, else tools ([docs/APP_CATEGORIES.md](docs/APP_CATEGORIES.md)) |
 | Home list | `ScrollView` → vertical `LinearLayout`; rows are `HorizontalScrollView` + `LinearLayout` |
-| App grid | 7 tiles per row, weight-based, inside a `ScrollView` (no `GridView` focus quirks); same `AppCardView` as Home |
+| App grid | eight tiles per row at the Home card size, weight-based, inside a `ScrollView` (no `GridView` focus quirks); same `AppCardView` as Home |
 | Home shelves | Fixed card width — eight across the content width — so short rows keep the same card size; rows scroll only beyond that |
 | Focus | `FocusSurface`: 2 dp accent ring, `card-hi` fill, 1.03 scale and 10 dp elevation; the rest background is captured and restored exactly on blur |
 | Quick panel | `FrameLayout` overlay: scrim + right sheet, `translationX` animation |
@@ -236,6 +237,7 @@ right-click opens a context menu.
 AstraLauncher/
 ├── README.md
 ├── DESIGN.md                     # tokens, components, screen specs, Android notes
+├── docs/APP_CATEGORIES.md        # discovery and category rules
 ├── LICENSE
 ├── android/                      # Android Studio / Gradle project (Java, no AndroidX)
 │   ├── build.gradle
@@ -246,6 +248,8 @@ AstraLauncher/
 │       └── src/main/
 │           ├── AndroidManifest.xml
 │           ├── java/com/astra/launcher/MainActivity.java
+│           ├── java/com/astra/launcher/AppRepository.java # discovery, categories, recent
+│           ├── java/com/astra/launcher/AppEntry.java      # immutable resolved app
 │           ├── java/com/astra/launcher/Palette.java       # tokens + shared drawables
 │           ├── java/com/astra/launcher/FocusSurface.java   # focus ring/scale, rest restore
 │           ├── java/com/astra/launcher/AppCardView.java    # Home/library app card
@@ -268,7 +272,9 @@ network status, empty states, Astra Settings, ambient screensaver). Next:
 
 ## Known limitations
 
-- Media detection is package-name based (`isMedia`) — good enough for this box, not universal.
+- Media detection is package-token based (`AppRepository.MEDIA_TOKENS`) — documented, maintainable, but still a local heuristic. A preinstalled sample package labelled “All Apps” (`com.example.all_apps`) shares a name with the launcher's All apps tile.
+- **Recently used** needs the system usage-access app-op (Settings → Recently used apps); without it the section is hidden. Data stays on the device and is read on a background thread.
+- The Home media shelf deliberately repeats pinned apps: PINNED is a shortcut shelf, the media row is the category. Phase 4 decides whether both stay.
 - Sleep needs a one-time device-admin activation; it is inert while `stay_on_while_plugged_in` is non-zero.
 - Reboot/shut down need a usable `su` for the app UID. On the reference box `/system/xbin/su` is
   `root:shell 4750`, so app-initiated root fails and the dialog falls back to system settings.

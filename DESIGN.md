@@ -113,10 +113,18 @@ Respect system “remove animations”: replace transitions with instant state, 
 - **First focus:** first pinned card on entry; the first shelf is immediately navigable.
 - **Wallpaper:** aurora glow or a dimmed photo (70% + vertical scrim 0x7A→0xB8) behind everything.
 
-### Apps (implemented, Phase 2 will restructure)
-- Title + installed count; chips All / Media / Tools / System; 7-column grid at 104 dp tile height
-  with 16 dp row gaps, using the same card component as Home.
-- Long-press: Open, Pin/Unpin, App info. Entry focus: first tile.
+### Apps (implemented, Phase 2)
+- Title + count of the selected section; chips **All / Favorites / Recently used / Media / Tools /
+  System**. Chips are generated from data: Favorites appears when pins exist, Recently used only when
+  usage access is granted, and an unavailable section is hidden rather than shown empty.
+- Grid: the same eight-across card size as Home (`cardWidth()`), 104 dp tall, 16 dp row gap, one
+  `AppCardView` per app. The grid is weight-based, so a row of eight is identical to a Home shelf.
+- Traversal: Up from the first grid row goes to the **active chip** (`nextFocusUpId`), not the
+  spatially nearest one; Down from a chip returns to the grid.
+- Long-press: Open, Pin/Unpin, App info. Entry focus: first tile. Empty states name the section
+  (“No pinned apps”, “No recently used apps yet”, “No apps in this category”) and a “Loading apps…”
+  state covers the first background load.
+- Category rules are documented in [docs/APP_CATEGORIES.md](docs/APP_CATEGORIES.md).
 
 ### Quick Panel (implemented, Phase 3 will fix)
 - Right sheet 340 dp wide, scrim `0xA8000000`, 52 dp rows: profile, Network, Ethernet, Date & time,
@@ -151,9 +159,12 @@ Respect system “remove animations”: replace transitions with instant state, 
   Launcher installed; the user switches HOME explicitly.
 - **Data:** `PackageManager` for apps and labels, `Intent` resolution for launch; prefs in
   `SharedPreferences` (`astra`).
-- **Performance:** icons are drawn from the package manager's drawables at 40 dp; keep the UI thread
-  free of package queries where possible (Phase 2 work), avoid per-frame allocations (screensaver
-  vignette still allocates — F-11).
+- **Data flow:** `AppRepository` resolves the app list, categories and the local recency list on one
+  worker thread and publishes immutable snapshots; no screen calls `PackageManager` while rendering.
+  `AppEntry` instances are built once per load, icons included.
+- **Performance:** icons are drawn from the package manager's drawables at 40 dp; the first Home frame
+  no longer waits for the app list (cold start dropped from ~2.5 s to ~1.7 s). Avoid per-frame
+  allocations (the screensaver vignette still allocates — F-11).
 - **TV specifics:** overscan-safe margins; D-pad key handling (`KEYCODE_DPAD_*`, `BACK`); no touch
   dependency for any action.
 - **Home rows:** fixed card width = eight across the content width; short rows keep the size and end
@@ -181,7 +192,7 @@ Respect system “remove animations”: replace transitions with instant state, 
 ## 7. Deferred from this spec
 - Panel backdrop blur and card drop shadows (cost, no visible benefit on this panel).
 - 4 px focus-ring offset (replaced by the 2 dp ring).
-- Favorites / Recently used library sections, provider content search, deep links.
+- Provider content search and deep links (the Favorites and Recently used sections shipped in Phase 2).
 - Hero card as a default surface (stays opt-in).
 - Panel scrolling (Phase 3), search restyle (Phase 5), dialog entry focus (Phase 5).
 
@@ -191,7 +202,7 @@ Respect system “remove animations”: replace transitions with instant state, 
 - [x] Android launcher (`android/`)
 - [x] Astra Settings, screensaver / ambient, photo wallpapers
 - [x] Phase 1 Home visual foundation — `docs/screenshots/phase-1/`
-- [ ] Phase 2 app library restructure
+- [x] Phase 2 app library restructure — `docs/screenshots/phase-2/`
 - [ ] Phase 3 quick panel
 - [ ] Phase 4 contextual information
 - [ ] Phase 5 consistency, accessibility, dialogs

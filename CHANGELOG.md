@@ -3,6 +3,36 @@
 All notable changes to Astra. The version below matches `versionName` in
 `android/app/build.gradle`; the app shows it in Settings → About.
 
+## [Unreleased]
+
+UI modernisation, phases 1–2.
+
+### Added
+- `AppRepository`: one source of truth for installed apps, categories and local recency, resolved on a
+  worker thread; screens read immutable snapshots and never touch `PackageManager` while rendering.
+- Library sections: Favorites (pinned, pin order) and Recently used (opt-in local usage stats, hidden
+  without access), alongside All / Media / Tools / System. Category rules in `docs/APP_CATEGORIES.md`.
+- Settings → Recently used apps, which opens the system usage-access screen.
+- `Palette` (tokens), `FocusSurface` (focus ring/scale, rest restore) and `AppCardView` (shared card).
+
+### Changed
+- Home shelves and the library share one card size (eight across the content width) and one card
+  component; a short shelf no longer stretches its cards.
+- Home top bar gained today's date; the system strip is smaller and quieter.
+- Category matching is per package token instead of substring, so `com.android.tv.settings` is no
+  longer at risk of being classed as media.
+- The first Home frame no longer waits for the app list: cold start ~2.5 s → ~1.7 s.
+
+### Fixed
+- Focus no longer repaints a surface it did not own: settings rows keep `raised`, panel rows keep no
+  background after focus passes (F-2 in `docs/UI_AUDIT.md`).
+- Up from the library's first grid row lands on the active chip.
+- Cold starts no longer drop the user's pins when the app list has not loaded yet.
+
+### Known issues
+- Quick panel still exceeds the screen height (Sleep/Power unreachable) — Phase 3.
+- Dialogs open without a focused child — Phase 5.
+
 ## [1.6] — 2026-11-08
 
 Reliability pass from the v1.5 source review (priority 0 items).

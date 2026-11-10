@@ -303,3 +303,52 @@ structure, panel, search or settings work.
 
 No performance claim is made for Phase 1: the numbers are inside baseline noise. The frame budget is
 still missed (p50 32 ms vs 16.7 ms), which is why Phase 6 keeps a measurement gate.
+
+---
+
+## 10. Phase 2 verification — 2026-11-10
+
+Scope: app discovery, categories, library structure, recency, icon/query cost. No panel, search,
+dialog or Home visual work beyond shelf wiring.
+
+| Finding | Status | Evidence |
+|---|---|---|
+| F-4 category accuracy / label collision | **partly fixed** | One documented rule replaced substring matching (`docs/APP_CATEGORIES.md`); Media/Tools/System now verified 8/1/7 on device. Home still repeats pinned apps in the media shelf — kept deliberately (shortcut row vs category row) and left for the Phase 4 content decision. The `com.example.all_apps` sample package still shares the "All Apps" label; filtering it would mean guessing from a package name. |
+| F-5 cold start blocked by package work | **fixed for first frame** | `AppRepository` resolves apps on a worker thread; cold start to first frame **2.48–2.50 s → 1.66–1.69 s** (−33%). Time until shelves are populated is not instrumented yet, so no claim is made for it. |
+| F-7 library geometry / focus order | **fixed** | Library uses the same 8-across card width and `AppCardView` as Home; Up from the first grid row lands on the active chip (verified with `uiautomator dump`). |
+| F-9 duplicated app primitives | **improved** | `loadApps`/`collect`/`isMedia`/`isTool`/`categoryApps` package-manager code left `MainActivity`; `AppRepository` + `AppEntry` own it. |
+| F-1, F-3, F-6, F-10, F-11, F-12 | open | unchanged in this phase |
+| **F-13 (new, P1) pins could be dropped on a cold start** | **fixed during phase** | `loadPins()` filtered pins against an app list that had not loaded yet; the first build after the refactor showed `PINNED · 0 apps`. Pins are now stored unfiltered and resolved at render. Regression caught on device before commit. |
+| **F-14 (new, informational) `PACKAGE_USAGE_STATS` declared** | accepted | Added only for the opt-in Recently used section; no other new permission. Hidden without access, revocable from system settings. |
+
+### Device verification
+
+| Check | Result |
+|---|---|
+| All 16 launchable apps discoverable | yes — All = 16, Media = 8, System = 7, Tools = 1 |
+| Favorites reflects pins in order | yes — 7 apps, Stremio → Plex → Prime Video → Disney+ → YouTube → Netflix → SmartTube |
+| Recently used hidden without access | yes — absent from the chip row before the app-op was granted |
+| Recently used after grant | yes — chip appears on resume, 5 apps, most recent first |
+| Pin/Unpin from the library | yes — pinned Settings from "Recently used", then unpinned; prefs restored to the original 7 |
+| Refresh app list | yes — async reload, Home rebuilds, no crash |
+| Up from grid → active chip | yes (`All, selected` / `Favorites` / `Recently used` per section) |
+| Crash/ANR buffer | empty |
+
+### Re-measured after Phase 2
+
+| Metric | Phase 1 | Phase 2 |
+|---|---|---|
+| APK | 58,323 B | **63,104 B** (+8.2 %) |
+| Cold start to first frame | 2.514 / 2.516 s | **1.689 / 1.669 / 1.662 s** |
+| PSS / RSS | 71,505 / 147,220 KB (fresh) | 73,764 / 150,840 KB (fresh) |
+| Focus traverse | 38 frames, 31.6 % janky, p50 32 ms | 38 frames, 36.8 % janky, p50 32 ms; later runs 45–55 % janky, p50 32–36 ms |
+
+The focus-animation measurement got noisier in this session (45–55 % janky across three runs) with no
+code path added to focus movement; it is recorded as-is rather than averaged away. Phase 6 owns a
+framestats-based gate.
+
+### Test artefact left on the device
+
+Usage access for `com.astra.launcher` is now **allowed** on the review device (granted through the
+system screen to verify the section). Revoke at Settings → Apps → Special access → Usage access if the
+default state is wanted.
