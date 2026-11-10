@@ -1314,13 +1314,14 @@ public class MainActivity extends Activity {
         dateView.setLetterSpacing(0.02f);
         bar.addView(dateView);
 
-        clockView = text("--:--", 15, TX2, Typeface.NORMAL);
+        clockView = text("--:--", 16, TX, Typeface.NORMAL);
         clockView.setLetterSpacing(0.01f);
         LinearLayout.LayoutParams clp = wrap();
         clp.leftMargin = dp(10);
         bar.addView(clockView, clp);
 
-        sysView = text("", 11, TX3, Typeface.NORMAL);
+        // Readable from the sofa: 13 sp secondary text, not 11 sp muted.
+        sysView = text("", 13, TX2, Typeface.NORMAL);
         sysView.setLetterSpacing(0.01f);
         LinearLayout.LayoutParams wlp = wrap();
         wlp.leftMargin = dp(18);

@@ -352,3 +352,10 @@ framestats-based gate.
 Usage access for `com.astra.launcher` is now **allowed** on the review device (granted through the
 system screen to verify the section). Revoke at Settings → Apps → Special access → Usage access if the
 default state is wanted.
+
+### Follow-up: top-bar legibility (2026-11-10)
+
+The system strip was 11 sp in `text/muted`, which is below the 10-foot reading size and sat under
+4.5:1 contrast. It is now 13 sp in `text/secondary` (~7:1), and the clock moved to 16 sp in
+`text/primary` to keep the hierarchy. Verified on device: strip bounds 1081–1671 px at 1080p, no
+collision with the brand or the search/panel targets; `docs/screenshots/phase-1/10-topbar-legibility.png`.

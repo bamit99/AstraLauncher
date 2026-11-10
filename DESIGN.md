@@ -52,7 +52,7 @@ Contrast: primary text on base ≥ 15:1; secondary ≥ 7:1; focus ring vs card �
 | Card label | 13 sp | 400 | app/action cards |
 | Row/body | 15–16 sp | 400 | settings + panel rows |
 | Shelf header | 12 sp, tracking 0.18 | 500 | Home shelves |
-| Metadata | 11–12 sp | 400 | dates, shelf meta, system strip |
+| Metadata | 12–13 sp | 400 | dates, shelf meta, system strip (13 sp, secondary colour) |
 
 Font: system default (Roboto / Noto Sans). No display faces — legibility over personality at 10 ft.
 Labels are single-line with end ellipsis; no label wraps.
@@ -99,9 +99,10 @@ Respect system “remove animations”: replace transitions with instant state, 
 
 ### Home (implemented)
 - **Top bar (52 dp):** 8 dp accent dot + `Astra` wordmark left. Right, in order: date (`Tue 10 Nov`,
-  12 sp muted), clock (15 sp secondary), live system strip (11 sp muted: `Wi-Fi · Net ↓21 Kb/s ·
+  12 sp muted), clock (16 sp primary), live system strip (13 sp secondary: `Wi-Fi · Net ↓21 Kb/s ·
   CPU 7% · RAM 0.7/1.5G · 215M free`), search glyph, panel glyph (40 dp targets). The strip samples
-  every 3 s and stops whenever the launcher is not resumed.
+  every 3 s and stops whenever the launcher is not resumed. It carries the most numbers on screen, so
+  it sits one step above micro type — 11 sp muted was unreadable past ~2 m.
 - **Shelves:** `PINNED` (with a real count as header meta), `STREAMING & MEDIA`, `TOOLS` (only when it
   has items). Each shelf uses the same card size: eight cards across the content width, 14 dp apart,
   104 dp tall. A row with fewer cards ends earlier and leaves the remaining slots empty — cards never
