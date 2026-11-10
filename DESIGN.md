@@ -127,12 +127,28 @@ Respect system “remove animations”: replace transitions with instant state, 
   state covers the first background load.
 - Category rules are documented in [docs/APP_CATEGORIES.md](docs/APP_CATEGORIES.md).
 
-### Quick Panel (implemented, Phase 3 will fix)
-- Right sheet 340 dp wide, scrim `0xA8000000`, 52 dp rows: profile, Network, Ethernet, Date & time,
-  HDMI input, Display, Sound, Storage, Launcher settings, Refresh app list, System settings,
-  Screensaver, Sleep, Power.
-- **Known defect (F-1):** 13 rows plus chrome exceed the 720 dp viewport; Sleep and Power are drawn
-  off-screen while focus can still reach them. No scroll container yet.
+### Quick Panel (implemented, Phase 3)
+- **Sheet:** 360 dp wide, `bg/raised`, 24 dp radius, scrim `0xA8000000`. A fixed profile header sits
+  above a scrollable body, so no row can be clipped off-screen — 13 rows of chrome never fit a 720 dp
+  viewport, which is exactly how Sleep and Power used to become unreachable.
+- **Groups:** `CONNECTION` (Network, Ethernet), `DEVICE` (Date & time, Display, Sound, Storage,
+  HDMI input), `LAUNCHER` (Launcher settings, Refresh app list), `POWER` (Screensaver, Sleep, Power),
+  `SYSTEM` (System settings). Group labels are 10 sp, tracked, muted.
+- **Rows:** 46 dp, label 15 sp primary left and value 13 sp secondary right, one focus treatment
+  (`QuickPanelRow`), value ellipsis. Every row carries a spoken description including its value.
+- **Live values, read from the device:** network/Ethernet from `ConnectivityManager`; date/time from
+  the clock tick; display from `Display.Mode` (e.g. `1920×1080 · 30 Hz`); sound from
+  `AudioManager.getDevices()` (HDMI / Bluetooth / TV speakers); storage from `StatFs` on `/data`.
+  All refresh on open and with the 15 s clock while the sheet is visible, and none of them run on the
+  cold-start path.
+- **Honest unavailability:** a control whose intent does not resolve is dimmed, removed from the
+  focus chain and reads `Not available` (HDMI input on the reference box). A status reading whose
+  shortcut does not resolve keeps its value as plain information instead of being replaced by a
+  failure message.
+- **Focus:** opening the sheet focuses the first row after the slide-in finishes; Back closes it and
+  restores focus to the item that opened it (by package tag, so a Home rebuild in between is
+  harmless), then to the first tile, and only then to the trigger button. Every row action closes
+  the sheet before handing over to another screen.
 
 ### Search (implemented, Phase 5 will restyle)
 - Full-screen overlay, single 20 sp field, one-column result list (icon, label, package), empty state
@@ -191,11 +207,12 @@ Respect system “remove animations”: replace transitions with instant state, 
 - **Black mode:** pure `#000000` with the clock only, for OLED.
 
 ## 7. Deferred from this spec
-- Panel backdrop blur and card drop shadows (cost, no visible benefit on this panel).
+- Panel backdrop blur and card drop shadows (cost, no visible benefit on this panel); the sheet uses
+  a scrim only.
 - 4 px focus-ring offset (replaced by the 2 dp ring).
 - Provider content search and deep links (the Favorites and Recently used sections shipped in Phase 2).
 - Hero card as a default surface (stays opt-in).
-- Panel scrolling (Phase 3), search restyle (Phase 5), dialog entry focus (Phase 5).
+- Search restyle (Phase 5), dialog entry focus (Phase 5), provider content search.
 
 ## 8. Deliverables status
 - [x] Baseline captures (device) — `docs/screenshots/baseline/`
@@ -204,6 +221,6 @@ Respect system “remove animations”: replace transitions with instant state, 
 - [x] Astra Settings, screensaver / ambient, photo wallpapers
 - [x] Phase 1 Home visual foundation — `docs/screenshots/phase-1/`
 - [x] Phase 2 app library restructure — `docs/screenshots/phase-2/`
-- [ ] Phase 3 quick panel
+- [x] Phase 3 quick panel — `docs/screenshots/phase-3/`
 - [ ] Phase 4 contextual information
 - [ ] Phase 5 consistency, accessibility, dialogs

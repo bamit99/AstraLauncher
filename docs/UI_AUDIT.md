@@ -359,3 +359,43 @@ The system strip was 11 sp in `text/muted`, which is below the 10-foot reading s
 4.5:1 contrast. It is now 13 sp in `text/secondary` (~7:1), and the clock moved to 16 sp in
 `text/primary` to keep the hierarchy. Verified on device: strip bounds 1081–1671 px at 1080p, no
 collision with the brand or the search/panel targets; `docs/screenshots/phase-1/10-topbar-legibility.png`.
+
+---
+
+## 11. Phase 3 verification — 2026-11-10
+
+Scope: Quick Panel only. No Home, library, search or settings redesign beyond the new usage row
+shipped in Phase 2.
+
+| Finding | Status | Evidence |
+|---|---|---|
+| F-1 panel taller than the viewport, Sleep/Power unreachable | **fixed** | Fixed header + scrollable body; 13 rows, 46 dp each. On device the chain now runs Network → Date & time → Sound → Storage → Launcher settings → Refresh → Screensaver → Sleep → Power → System settings, and the last rows are visible (`docs/screenshots/phase-3/02-panel-bottom.png`). |
+| F-3 stale/invented panel values | **fixed** | Date/time, `Display.Mode` (1920×1080 · 30 Hz here), `AudioManager.getDevices` (HDMI) and `StatFs` (0.2 of 2.1 GB free) are read live and refreshed on open and with the clock; the previous strings were literals. |
+| Back restores focus to the opener | **fixed** | Focus returns to the tile that opened the panel by package tag, verified after opening from Plex and from Stremio (`04-focus-restored.png`). |
+| F-12 dialogs open unfocused | open (Phase 5) | unchanged for the long-press app menu; the Power dialog does focus Cancel. |
+| **F-15 (new, P1) focus could be lost entirely after a Home rebuild** | **fixed** | Rebuilds requested focus before layout, so it landed on the scroller or nowhere; screens now focus via `focusWhenLaidOut`, and a rebuild no longer steals focus from an open overlay. |
+| **F-16 (new, P2) orphaned panel overlay after a system hand-off** | **fixed** | `hidePanel(false)` now closes instantly (no animation that can freeze while the window is hidden) and `onResume` clears any stale overlay. |
+| **F-17 (new, P1) panel row resolution on the cold-start path** | **fixed** | Seven `PackageManager.resolveActivity` calls moved from `buildPanel()` to the first open (`preparePanel()`); values also start at `—` instead of querying audio/display/storage during `onCreate`. |
+
+### Device verification
+
+| Check | Result |
+|---|---|
+| Panel opens with Network focused | yes |
+| D-pad reaches every row, including Sleep and Power | yes; unavailable rows are skipped |
+| Sheet scrolls with focus, nothing clipped | yes |
+| Unavailable control stated honestly | `HDMI input — Not available`, dimmed, not focusable |
+| Status row with no shortcut still shows its value | Ethernet info row; Display/Sound/Storage stay readable if their settings screen is missing |
+| Row action hands over cleanly | Storage → system storage screen; Back returns to Astra with no orphan sheet |
+| Power dialog | opens with Cancel focused; Cancel returns to Home |
+| Refresh app list | panel closes, list reloads, Home rebuilds, focus back on the opening tile |
+| Back restores opener | Plex / Stremio, verified by `uiautomator dump` |
+| Crash/ANR buffer | empty |
+
+### Measurement note
+
+Cold start could not be measured cleanly in this session: the reference box had ~140 MB free and
+311 MB swapped, and a neighbouring process (SmartTube) ran a 1.76 s GC inside the same window. Runs
+ranged 2.26–3.9 s against the 1.66–1.69 s recorded in Phase 2, so no before/after claim is made for
+Phase 3. The panel work removed seven binder calls from `onCreate`, which should only help; Phase 6
+owns a controlled measurement on a quiet device.

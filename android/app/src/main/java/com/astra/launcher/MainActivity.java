@@ -12,6 +12,8 @@ import android.content.Intent;
 import android.content.ContentUris;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.media.AudioDeviceInfo;
+import android.media.AudioManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -48,7 +50,9 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.view.Window;
+import android.view.Display;
 import android.view.WindowManager;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.BaseAdapter;
@@ -118,8 +122,16 @@ public class MainActivity extends Activity {
     private long lastCpuTotal = -1, lastCpuIdle = -1, lastCpuAt = 0;
     private int lastCpuPct = -1;
     private int cpuSamples = 0;
-    private TextView panelNetValue;
-    private TextView panelEthValue;
+    private QuickPanelRow panelNetRow;
+    private QuickPanelRow panelEthRow;
+    private QuickPanelRow panelDateRow;
+    private QuickPanelRow panelDisplayRow;
+    private QuickPanelRow panelSoundRow;
+    private QuickPanelRow panelStorageRow;
+    private View focusBeforePanel;
+    private String panelOpenerTag;
+    private boolean panelPrepared;
+    private String lastFocusedTileTag;
     private TextView searchEmpty;
     private View homeFirstFocus;
     private View panelTrigger;
@@ -181,6 +193,11 @@ public class MainActivity extends Activity {
 
         buildHome();
         setContentView(root);
+        root.getViewTreeObserver().addOnGlobalFocusChangeListener((oldFocus, newFocus) -> {
+            if (newFocus == null) return;
+            Object tag = newFocus.getTag();
+            if (tag instanceof String) lastFocusedTileTag = (String) tag;
+        });
         usageAccess = AppRepository.hasUsageAccess(this);
         loadApps(false);
     }
@@ -209,6 +226,10 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(sysTick);
         handler.post(sysTick);
         resetIdle();
+        if (!panelOpen && panelOverlay != null && panelOverlay.getVisibility() == View.VISIBLE) {
+            panelOverlay.setVisibility(View.GONE);
+            panel.setTranslationX(dp(360));
+        }
         if ("photos".equals(prefs.getString("wallpaper", "astra"))) loadPhotos();
         if ("settings".equals(screen)) showSettings();
         boolean usage = AppRepository.hasUsageAccess(this);
@@ -722,10 +743,8 @@ public class MainActivity extends Activity {
 
         contentHost.addView(scroll, match());
         final int focus = settingsIndex;
-        contentHost.post(() -> {
-            View target = focus >= 0 && focus < rows.length ? rows[focus] : rows[0];
-            if (target != null) target.requestFocus();
-        });
+        contentHost.post(() -> focusWhenLaidOut(
+                focus >= 0 && focus < rows.length ? rows[focus] : rows[0]));
     }
 
     /* ------------------------------------------------------------------ */
@@ -795,7 +814,7 @@ public class MainActivity extends Activity {
         }
 
         contentHost.addView(scroll, match());
-        contentHost.post(() -> { if (first[0] != null) first[0].requestFocus(); });
+        contentHost.post(() -> focusWhenLaidOut(first[0]));
     }
 
     private View photoTile(final int index, long currentId) {
@@ -911,12 +930,8 @@ public class MainActivity extends Activity {
     }
 
     private void updateNetwork() {
-        String label = networkLabel();
         if (sysView != null) updateSys();
-        if (panelNetValue != null) panelNetValue.setText(networkDetail());
-        if (panelEthValue != null) {
-            panelEthValue.setText("Ethernet".equals(label) ? "Connected" : "Not connected");
-        }
+        if (panelNetRow != null && panelOpen) refreshPanelValues();
     }
 
     /* ------------------------------------------------------------------ */
@@ -1233,7 +1248,11 @@ public class MainActivity extends Activity {
         }
 
         contentHost.addView(scroll, match());
-        contentHost.post(() -> { if (homeFirstFocus != null) homeFirstFocus.requestFocus(); });
+        final View firstHome = homeFirstFocus;
+        contentHost.post(() -> {
+            if (panelOpen || searchOpen || saverVisible) return;
+            focusWhenLaidOut(firstHome);
+        });
     }
 
     private boolean isPinned(String pkg) {
@@ -1570,7 +1589,7 @@ public class MainActivity extends Activity {
         }
 
         contentHost.addView(scroll, match());
-        contentHost.post(() -> { if (firstTile[0] != null) firstTile[0].requestFocus(); });
+        contentHost.post(() -> focusWhenLaidOut(firstTile[0]));
     }
 
     /** The selected library section, resolved from the cached repository snapshot. */
@@ -1739,19 +1758,21 @@ public class MainActivity extends Activity {
         panelScrim.setOnClickListener(v -> hidePanel());
         panelOverlay.addView(panelScrim, match());
 
+        // The sheet is a fixed header plus a scrollable body: thirteen rows never fit a 720 dp
+        // viewport, and clipping them silently is how Sleep and Power became unreachable.
         panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setBackground(shaped(RAISED, LINE, 2));
-        panel.setPadding(dp(22), dp(30), dp(22), dp(24));
+        panel.setPadding(dp(20), dp(24), dp(20), dp(18));
         panel.setElevation(dp(24));
-        FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(dp(340),
+        FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(dp(360),
                 ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END);
         panelOverlay.addView(panel, plp);
 
         LinearLayout profile = new LinearLayout(this);
         profile.setOrientation(LinearLayout.HORIZONTAL);
         profile.setGravity(Gravity.CENTER_VERTICAL);
-        profile.setPadding(0, 0, 0, dp(16));
+        profile.setPadding(0, 0, 0, dp(14));
 
         TextView avatar = text("A", 18, 0xFF06121D, Typeface.BOLD);
         avatar.setGravity(Gravity.CENTER);
@@ -1768,75 +1789,219 @@ public class MainActivity extends Activity {
         profile.addView(names, nlp);
         panel.addView(profile);
 
-        View netRow = panelRow("Network", networkDetail(), intentAction(Settings.ACTION_WIFI_SETTINGS));
-        panelNetValue = rowValue(netRow);
-        panel.addView(netRow);
+        ScrollView body = new ScrollView(this);
+        body.setVerticalScrollBarEnabled(false);
+        body.setClipToPadding(false);
+        // Rows first, scroller second: otherwise the ScrollView takes focus and no row shows a ring.
+        body.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        body.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        body.addView(col, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        View ethRow = panelRow("Ethernet", "Not connected", null);
-        panelEthValue = rowValue(ethRow);
-        panel.addView(ethRow);
-        panel.addView(panelRow("Date & time", new SimpleDateFormat("EEE d MMM · HH:mm", Locale.getDefault()).format(new Date()), intentAction(Settings.ACTION_DATE_SETTINGS)));
-        panel.addView(divider());
-        panel.addView(panelRow("HDMI input", "Switch source", intentAction("android.settings.TV_INPUT_SETTINGS")));
-        panel.addView(panelRow("Display", "1080p · 60 Hz", intentAction(Settings.ACTION_DISPLAY_SETTINGS)));
-        panel.addView(panelRow("Sound", "TV speakers", intentAction(Settings.ACTION_SOUND_SETTINGS)));
-        panel.addView(panelRow("Storage", "Manage space", intentAction(Settings.ACTION_INTERNAL_STORAGE_SETTINGS)));
-        panel.addView(divider());
-        panel.addView(panelActionRow("Launcher settings", "Astra", this::showSettings));
-        panel.addView(panelActionRow("Refresh app list", "Rescan installed apps", this::refreshApps));
-        panel.addView(panelRow("System settings", "Android TV", intentAction(Settings.ACTION_SETTINGS)));
-        panel.addView(panelActionRow("Screensaver", "Start now", this::showScreensaver));
-        panel.addView(panelActionRow("Sleep", "Turn display off", this::sleepDevice));
-        panel.addView(panelActionRow("Power", "Restart or shut down", this::showPowerDialog));
+        /* Connection */
+        col.addView(groupLabel("CONNECTION"));
+        // Values are filled in by refreshPanelValues() when the sheet opens: no audio/display IPC
+        // on the cold-start path.
+        panelNetRow = panelStatus("Network", "\u2014", intentAction(Settings.ACTION_WIFI_SETTINGS));
+        col.addView(panelNetRow);
+        panelEthRow = panelInfo("Ethernet", "Not connected");
+        col.addView(panelEthRow);
+
+        /* Device state — every value is read from the device, refreshed while the panel is open. */
+        col.addView(groupLabel("DEVICE"));
+        panelDateRow = panelStatus("Date & time", "\u2014", intentAction(Settings.ACTION_DATE_SETTINGS));
+        col.addView(panelDateRow);
+        panelDisplayRow = panelStatus("Display", "\u2014", intentAction(Settings.ACTION_DISPLAY_SETTINGS));
+        col.addView(panelDisplayRow);
+        panelSoundRow = panelStatus("Sound", "\u2014", intentAction(Settings.ACTION_SOUND_SETTINGS));
+        col.addView(panelSoundRow);
+        panelStorageRow = panelStatus("Storage", "\u2014", intentAction(Settings.ACTION_INTERNAL_STORAGE_SETTINGS));
+        col.addView(panelStorageRow);
+        col.addView(panelRow("HDMI input", "Switch source", intentAction("android.settings.TV_INPUT_SETTINGS")));
+
+        /* Launcher */
+        col.addView(groupLabel("LAUNCHER"));
+        col.addView(panelAction("Launcher settings", "Astra", this::showSettings));
+        col.addView(panelAction("Refresh app list", "Rescan installed apps", this::refreshApps));
+
+        /* Power */
+        col.addView(groupLabel("POWER"));
+        col.addView(panelAction("Screensaver", "Start now", this::showScreensaver));
+        col.addView(panelAction("Sleep", "Turn display off", this::sleepDevice));
+        col.addView(panelAction("Power", "Restart or shut down", this::showPowerDialog));
+
+        /* System */
+        col.addView(groupLabel("SYSTEM"));
+        col.addView(panelRow("System settings", "Android TV", intentAction(Settings.ACTION_SETTINGS)));
+
+        panel.addView(body);
     }
 
-    private View panelRow(String label, String value, final Intent intent) {
-        if (intent == null) return panelActionRow(label, value, null);
-        return panelActionRow(label, value, () -> {
-            try { startActivity(intent); }
-            catch (ActivityNotFoundException ex) { toast("Not available"); }
-        });
+    private TextView groupLabel(String title) {
+        TextView t = text(title, 10, TX3, Typeface.BOLD);
+        t.setLetterSpacing(0.18f);
+        LinearLayout.LayoutParams lp = wrap();
+        lp.topMargin = dp(12);
+        lp.bottomMargin = dp(4);
+        lp.leftMargin = dp(12);
+        t.setLayoutParams(lp);
+        return t;
     }
 
-    /** The secondary (value) TextView of a panel row built by {@link #panelActionRow}. */
-    private TextView rowValue(View row) {
-        try {
-            return (TextView) ((LinearLayout) ((LinearLayout) row).getChildAt(0)).getChildAt(1);
-        } catch (Exception e) {
-            return null;
+    /** A status row: value first, shortcut second. Availability is resolved when the panel opens. */
+    private QuickPanelRow panelStatus(String label, String value, Intent intent) {
+        QuickPanelRow row = new QuickPanelRow(this).set(label, value);
+        row.bindIntent(intent);
+        row.markStatus();
+        return row;
+    }
+
+    /** A row that opens a system screen; availability is resolved when the panel opens. */
+    private QuickPanelRow panelRow(String label, String value, Intent intent) {
+        QuickPanelRow row = new QuickPanelRow(this).set(label, value);
+        row.bindIntent(intent);
+        return row;
+    }
+
+    /**
+     * Resolve row targets and wire their clicks once, on first open.
+     *
+     * <p>Doing this in onCreate() cost ~0.8 s of cold start: seven
+     * {@code PackageManager.resolveActivity} calls land on the boot-time package lock.
+     */
+    private void preparePanel() {
+        if (panelPrepared) return;
+        panelPrepared = true;
+        bindPanelRows(panel);
+    }
+
+    private void bindPanelRows(ViewGroup group) {
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (child instanceof QuickPanelRow) {
+                bindPanelRow((QuickPanelRow) child);
+            } else if (child instanceof ViewGroup) {
+                bindPanelRows((ViewGroup) child);
+            }
         }
     }
 
-    private View panelActionRow(String label, String value, final Runnable action) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setFocusable(true);
-        row.setPadding(dp(12), 0, dp(12), 0);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(52));
-        row.setLayoutParams(lp);
-
-        LinearLayout col = new LinearLayout(this);
-        col.setOrientation(LinearLayout.VERTICAL);
-        col.setGravity(Gravity.CENTER_VERTICAL);
-        TextView t = text(label, 15, TX, Typeface.NORMAL);
-        TextView v = text(value, 11, TX3, Typeface.NORMAL);
-        col.addView(t);
-        col.addView(v);
-        row.addView(col, new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        FocusSurface.attach(row, 12);
-        row.setOnClickListener(view -> {
-            hidePanel(false);
-            if (action != null) {
+    private void bindPanelRow(final QuickPanelRow row) {
+        Runnable action = row.action();
+        if (action != null) {
+            row.setOnClickListener(v -> {
+                hidePanel(false);
                 action.run();
-            } else {
-                toast(label);
+            });
+            return;
+        }
+        final Intent intent = row.intent();
+        if (intent == null) {
+            row.setInfo();
+            return;
+        }
+        boolean available = getPackageManager().resolveActivity(intent, 0) != null;
+        if (!available && row.isStatus()) {
+            row.setInfo();
+            return;
+        }
+        if (!available) {
+            row.setAvailable(false);
+            return;
+        }
+        row.setOnClickListener(v -> {
+            hidePanel(false);
+            try {
+                startActivity(intent);
+            } catch (ActivityNotFoundException ex) {
+                toast("Not available");
             }
         });
+    }
+
+    /** A read-only status row: normal colours, outside the focus chain. */
+    private QuickPanelRow panelInfo(String label, String value) {
+        QuickPanelRow row = new QuickPanelRow(this).set(label, value);
+        row.setFocusable(false);
+        row.setClickable(false);
         return row;
+    }
+
+    /** A row that runs in the launcher; the panel closes before the action so focus stays sane. */
+    private QuickPanelRow panelAction(String label, String value, final Runnable action) {
+        QuickPanelRow row = new QuickPanelRow(this).set(label, value);
+        row.setOnClickListener(v -> {
+            hidePanel(false);
+            action.run();
+        });
+        return row;
+    }
+
+    private String dateLabel() {
+        return new SimpleDateFormat("EEE d MMM · HH:mm", Locale.getDefault()).format(new Date());
+    }
+
+    private String displayLabel() {
+        Display display = getWindowManager().getDefaultDisplay();
+        Display.Mode mode = display.getMode();
+        if (mode == null) return "\u2014";
+        return mode.getPhysicalWidth() + "\u00d7" + mode.getPhysicalHeight()
+                + " · " + Math.round(mode.getRefreshRate()) + " Hz";
+    }
+
+    private String soundLabel() {
+        AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+        if (am == null) return "\u2014";
+        boolean speaker = false;
+        boolean bluetooth = false;
+        AudioDeviceInfo[] outputs = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS);
+        for (AudioDeviceInfo out : outputs) {
+            switch (out.getType()) {
+                case AudioDeviceInfo.TYPE_HDMI:
+                case AudioDeviceInfo.TYPE_HDMI_ARC:
+                case AudioDeviceInfo.TYPE_HDMI_EARC:
+                    return "HDMI";
+                case AudioDeviceInfo.TYPE_BLUETOOTH_A2DP:
+                    bluetooth = true;
+                    break;
+                case AudioDeviceInfo.TYPE_BUILTIN_SPEAKER:
+                    speaker = true;
+                    break;
+                default:
+                    break;
+            }
+        }
+        if (bluetooth) return "Bluetooth";
+        return speaker ? "TV speakers" : "\u2014";
+    }
+
+    private String storageLabel() {
+        try {
+            StatFs st = new StatFs(android.os.Environment.getDataDirectory().getAbsolutePath());
+            double freeGb = st.getAvailableBytes() / 1073741824.0;
+            double totalGb = st.getTotalBytes() / 1073741824.0;
+            return String.format(Locale.getDefault(), "%.1f of %.1f GB free", freeGb, totalGb);
+        } catch (Exception e) {
+            return "\u2014";
+        }
+    }
+
+    /** Re-read every live value; cheap enough to run with the clock while the sheet is visible. */
+    private void refreshPanelValues() {
+        if (panelNetRow != null) {
+            String label = networkLabel();
+            panelNetRow.setValue(networkDetail());
+            if (panelEthRow != null) {
+                panelEthRow.setValue("Ethernet".equals(label) ? "Connected" : "Not connected");
+            }
+        }
+        if (panelDateRow != null) panelDateRow.setValue(dateLabel());
+        if (panelDisplayRow != null) panelDisplayRow.setValue(displayLabel());
+        if (panelSoundRow != null) panelSoundRow.setValue(soundLabel());
+        if (panelStorageRow != null) panelStorageRow.setValue(storageLabel());
     }
 
     /* ------------------------------------------------------------------ */
@@ -1999,29 +2164,78 @@ public class MainActivity extends Activity {
         }, "astra-root").start();
     }
 
-    private View divider() {
-        View v = new View(this);
-        v.setBackgroundColor(LINE);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
-        lp.topMargin = dp(10);
-        lp.bottomMargin = dp(10);
-        v.setLayoutParams(lp);
-        return v;
-    }
-
     private void showPanel() {
         if (panelOpen) return;
         panelOpen = true;
+        preparePanel();
+        focusBeforePanel = getCurrentFocus();
+        Object tag = focusBeforePanel == null ? null : focusBeforePanel.getTag();
+        // The window can report the Home scroller rather than the tile inside it, so fall back to
+        // the last tagged tile the focus tracker saw.
+        panelOpenerTag = tag instanceof String ? (String) tag : lastFocusedTileTag;
+        refreshPanelValues();
         panelOverlay.setVisibility(View.VISIBLE);
         panel.setTranslationX(dp(360));
+        // The sheet was GONE, so it has no laid-out children until it is on screen; move focus in
+        // once the slide-in finishes, which is the first moment requestFocus() sticks.
         panel.animate().translationX(0).setDuration(220)
-                .setInterpolator(new DecelerateInterpolator()).start();
+                .setInterpolator(new DecelerateInterpolator())
+                .withEndAction(this::focusFirstPanelRow).start();
         panelScrim.setAlpha(0f);
         panelScrim.animate().alpha(1f).setDuration(220).start();
-        panel.post(() -> {
-            if (panel.getChildCount() > 1) panel.getChildAt(1).requestFocus();
-        });
+    }
+
+    private void focusFirstPanelRow() {
+        View first = firstFocusable(panel);
+        if (first != null) first.requestFocus();
+    }
+
+    /**
+     * Focus a view only once it has been laid out. Immediately after a screen rebuild the target
+     * has no bounds, and requestFocus() then leaves focus on the nearest container (or on nothing),
+     * which is how Home ended up with no focused tile after a background reload.
+     */
+    private void focusWhenLaidOut(final View target) {
+        if (target == null) return;
+        if (target.isShown() && target.getWidth() > 0) {
+            target.requestFocus();
+            return;
+        }
+        target.getViewTreeObserver().addOnGlobalLayoutListener(
+                new ViewTreeObserver.OnGlobalLayoutListener() {
+                    @Override public void onGlobalLayout() {
+                        if (!target.isAttachedToWindow()) {
+                            target.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                            return;
+                        }
+                        if (target.getWidth() == 0) return;
+                        target.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                        target.requestFocus();
+                    }
+                });
+    }
+
+    private boolean isInside(ViewGroup parent, View child) {
+        for (View v = child; v != null; ) {
+            if (v == parent) return true;
+            if (!(v.getParent() instanceof View)) return false;
+            v = (View) v.getParent();
+        }
+        return false;
+    }
+
+    /** First focusable row inside a container, preferring descendants over the scroller itself. */
+    private View firstFocusable(ViewGroup group) {
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (child.getVisibility() != View.VISIBLE) continue;
+            if (child instanceof ViewGroup) {
+                View inner = firstFocusable((ViewGroup) child);
+                if (inner != null) return inner;
+            }
+            if (child.isFocusable()) return child;
+        }
+        return null;
     }
 
     private void hidePanel() {
@@ -2029,12 +2243,34 @@ public class MainActivity extends Activity {
     }
 
     private void hidePanel(boolean restoreFocus) {
-        if (!panelOpen) return;
+        if (!panelOpen) {
+            // A close animation can be frozen when the panel launches a system screen; never leave
+            // an orphaned sheet behind.
+            if (panelOverlay != null) panelOverlay.setVisibility(View.GONE);
+            return;
+        }
         panelOpen = false;
+        if (!restoreFocus) {
+            // The panel is being dismissed to hand over to another screen: no point animating
+            // something the user will not see.
+            panelOverlay.setVisibility(View.GONE);
+            panel.setTranslationX(dp(360));
+            return;
+        }
         panel.animate().translationX(dp(360)).setDuration(180).start();
         panelScrim.animate().alpha(0f).setDuration(180).withEndAction(() -> {
             panelOverlay.setVisibility(View.GONE);
-            if (restoreFocus && panelTrigger != null) panelTrigger.requestFocus();
+            if (!restoreFocus) return;
+            // Back to the tile that opened the panel, even if Home was rebuilt meanwhile.
+            if (panelOpenerTag != null) {
+                focusTile(panelOpenerTag);
+                if (contentHost.findFocus() != null) return;
+            }
+            if (homeFirstFocus != null) {
+                focusWhenLaidOut(homeFirstFocus);
+                if (contentHost.findFocus() != null) return;
+            }
+            if (panelTrigger != null) panelTrigger.requestFocus();
         }).start();
     }
 
@@ -2139,8 +2375,7 @@ public class MainActivity extends Activity {
     /** Restore focus to the tile of a package after a screen rebuild. */
     private void focusTile(String pkg) {
         if (pkg == null || contentHost == null) return;
-        View v = contentHost.findViewWithTag(pkg);
-        if (v != null) v.requestFocus();
+        focusWhenLaidOut(contentHost.findViewWithTag(pkg));
     }
 
     private Intent intentAction(String action) {

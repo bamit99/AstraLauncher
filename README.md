@@ -56,7 +56,7 @@ tasks. Astra is the opposite — an explicit, honest surface:
 
 - **Home** — pinned row, streaming/media row and a tools row, with a live system strip (throughput, CPU, RAM, free storage), today's date, clock, search and panel in the top bar. The quick-start card is opt-in (Settings → Home card, default off) because the pinned row already covers launch targets. Rows always end on a gap, never through a card.
 - **Apps** — sections for **All**, **Favorites** (pinned, in pin order), **Recently used** (local usage stats, only after the user grants usage access), **Media**, **Tools** and **System**; an eight-across grid using the same card as Home; long-press for a context menu (Open / Pin / Unpin / App info). Category rules are documented in [docs/APP_CATEGORIES.md](docs/APP_CATEGORIES.md).
-- **Quick panel** — right sheet with live network and Ethernet state, date/time, HDMI, display, sound, storage, refresh app list, Astra settings, screensaver, sleep and power. Every row closes the panel when it acts.
+- **Quick panel** — a scrollable sheet grouped into Connection, Device, Launcher, Power and System. Network, date/time, display mode, audio output and storage are read from the device and refresh while the sheet is open; a control the device cannot service is dimmed and says “Not available” instead of pretending. Every row closes the panel when it acts, Back returns focus to the tile that opened it, and nothing is ever clipped off the bottom.
 - **Search** — filters installed apps as you type, launches them, and shows an empty state when nothing matches.
 - **Screensaver / ambient** — after an idle delay: a thin clock over the Astra aurora or your own photo folder, optional pure-black mode; any key returns to the launcher.
 - **Settings** — screensaver timeout and style, 12/24-hour clock, wallpaper source, preview and reset.
@@ -132,7 +132,7 @@ APK at ~58 KB. Design tokens live in `Palette`, focus behaviour in `FocusSurface
 | App grid | eight tiles per row at the Home card size, weight-based, inside a `ScrollView` (no `GridView` focus quirks); same `AppCardView` as Home |
 | Home shelves | Fixed card width — eight across the content width — so short rows keep the same card size; rows scroll only beyond that |
 | Focus | `FocusSurface`: 2 dp accent ring, `card-hi` fill, 1.03 scale and 10 dp elevation; the rest background is captured and restored exactly on blur |
-| Quick panel | `FrameLayout` overlay: scrim + right sheet, `translationX` animation |
+| Quick panel | `FrameLayout` overlay: scrim + right sheet with a fixed header and a scrollable body; `QuickPanelRow` per line, `translationX` animation |
 | Sleep | `DevicePolicyManager.lockNow()` with a minimal `force-lock` device admin |
 | Power | dialog → `su 0 sh -c reboot` / `reboot -p`, system-settings fallback |
 | Search | `EditText` + `ListView` with a filtering inner adapter |
@@ -286,7 +286,7 @@ network status, empty states, Astra Settings, ambient screensaver). Next:
   collection changes, not on every resume.
 - The screensaver is an in-activity overlay, not a system dream service, so it only appears while Astra is in front;
   it is torn down on pause so it can never linger over another app.
-- Quick panel exposes system settings intents, which vary by OEM.
+- Quick panel exposes system settings intents, which vary by OEM; on the reference box `HDMI input` has no handler and is shown as unavailable, and the panel reports the display's real mode (30 Hz on this TV).
 - Disabling Google TV Launcher also removes its search/shop surfaces; revert if you want them back.
 
 ## License

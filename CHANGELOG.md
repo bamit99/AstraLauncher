@@ -5,7 +5,7 @@ All notable changes to Astra. The version below matches `versionName` in
 
 ## [Unreleased]
 
-UI modernisation, phases 1–2.
+UI modernisation, phases 1–3.
 
 ### Added
 - `AppRepository`: one source of truth for installed apps, categories and local recency, resolved on a
@@ -29,9 +29,22 @@ UI modernisation, phases 1–2.
 - Up from the library's first grid row lands on the active chip.
 - Cold starts no longer drop the user's pins when the app list has not loaded yet.
 
+### Fixed
+- Quick panel fit: the sheet is now a fixed header plus a scrollable body, so every row — including
+  Sleep and Power — is reachable; focus can no longer move to a row drawn off-screen.
+- Quick panel values are real and live: date/time, display mode (`Display.Mode`), audio output
+  (`AudioManager.getDevices`) and storage (`StatFs`) replace the static "1080p · 60 Hz",
+  "TV speakers" and "Manage space" strings, and refresh while the sheet is open.
+- Closing the panel returns focus to the tile that opened it (tracked by package tag, so a Home
+  rebuild cannot lose it), then to the first tile, then to the trigger.
+- A Home rebuild no longer steals focus from an open overlay, and no longer leaves focus unset when
+  it rebuilds — the previous code requested focus before layout, which could land on the scroller.
+- Dismissing the panel to open a system screen no longer leaves an orphan sheet on return.
+- Row targets are resolved when the panel opens, not in `onCreate`; seven
+  `PackageManager.resolveActivity` calls were on the cold-start path.
+
 ### Known issues
-- Quick panel still exceeds the screen height (Sleep/Power unreachable) — Phase 3.
-- Dialogs open without a focused child — Phase 5.
+- Dialogs opened from a long-press still appear without a focused child — Phase 5.
 
 ## [1.6] — 2026-11-08
 
