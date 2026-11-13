@@ -39,6 +39,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.StatFs;
 import android.os.SystemClock;
+import android.os.storage.StorageManager;
+import android.os.storage.StorageVolume;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.text.Editable;
@@ -974,6 +976,8 @@ public class MainActivity extends Activity {
                         freeBytes / 1048576.0));
             }
         } catch (Exception ignored) { }
+
+        appendRemovableFree(sb);
 
         sysView.setText(sb.toString());
     }
@@ -1978,15 +1982,83 @@ public class MainActivity extends Activity {
         return speaker ? "TV speakers" : "\u2014";
     }
 
+    /** True when the volume is mounted (API < 25 falls back to a stat probe). */
+    private boolean volumeMounted(StorageVolume vol) {
+        if (Build.VERSION.SDK_INT >= 25) return "mounted".equals(vol.getState());
+        String path = volPath(vol);
+        if (path == null) return false;
+        try {
+            new StatFs(path).getAvailableBytes();
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Mounted removable (SD card) volumes; empty when no card is popped in. */
+    private List<StorageVolume> removableMounted() {
+        List<StorageVolume> out = new ArrayList<>();
+        if (Build.VERSION.SDK_INT < 24) return out;
+        try {
+            StorageManager sm = getSystemService(StorageManager.class);
+            if (sm == null) return out;
+            for (StorageVolume vol : sm.getStorageVolumes()) {
+                if (vol != null && vol.isRemovable() && volumeMounted(vol)) out.add(vol);
+            }
+        } catch (Exception ignored) { }
+        return out;
+    }
+
+    /** Mount path of a volume: getDirectory() on API 30+, reflected getPath() earlier. */
+    private String volPath(StorageVolume vol) {
+        if (Build.VERSION.SDK_INT >= 30) {
+            java.io.File dir = vol.getDirectory();
+            return dir == null ? null : dir.getAbsolutePath();
+        }
+        try {
+            return (String) StorageVolume.class.getMethod("getPath").invoke(vol);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** One "· 7.5G SD" segment per mounted card; the 3-second tick picks up insert/eject. */
+    private void appendRemovableFree(StringBuilder sb) {
+        for (StorageVolume vol : removableMounted()) {
+            try {
+                String path = volPath(vol);
+                if (path == null) continue;
+                StatFs st = new StatFs(path);
+                long freeBytes = st.getAvailableBytes();
+                if (freeBytes < 0) continue;
+                String seg = (freeBytes >= 1073741824L)
+                        ? String.format(Locale.getDefault(), "%.1fG SD", freeBytes / 1073741824.0)
+                        : String.format(Locale.getDefault(), "%.0fM SD", freeBytes / 1048576.0);
+                sb.append("  \u00b7  ").append(seg);
+            } catch (Exception ignored) { }
+        }
+    }
+
     private String storageLabel() {
+        StringBuilder sb = new StringBuilder("\u2014");
         try {
             StatFs st = new StatFs(android.os.Environment.getDataDirectory().getAbsolutePath());
             double freeGb = st.getAvailableBytes() / 1073741824.0;
             double totalGb = st.getTotalBytes() / 1073741824.0;
-            return String.format(Locale.getDefault(), "%.1f of %.1f GB free", freeGb, totalGb);
-        } catch (Exception e) {
-            return "\u2014";
+            sb = new StringBuilder(String.format(Locale.getDefault(),
+                    "%.1f of %.1f GB free", freeGb, totalGb));
+        } catch (Exception e) { }
+        for (StorageVolume vol : removableMounted()) {
+            try {
+                String path = volPath(vol);
+                if (path == null) continue;
+                StatFs sd = new StatFs(path);
+                sb.append(String.format(Locale.getDefault(), "  \u00b7  SD %.1f/%.1f GB",
+                        sd.getAvailableBytes() / 1073741824.0,
+                        sd.getTotalBytes() / 1073741824.0));
+            } catch (Exception ignored) { }
         }
+        return sb.toString();
     }
 
     /** Re-read every live value; cheap enough to run with the clock while the sheet is visible. */

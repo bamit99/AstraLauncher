@@ -27,6 +27,10 @@ UI modernisation, phases 1–3.
 - Focus no longer repaints a surface it did not own: settings rows keep `raised`, panel rows keep no
   background after focus passes (F-2 in `docs/UI_AUDIT.md`).
 - Up from the library's first grid row lands on the active chip.
+- The system strip and the Storage quick-panel row include SD cards: every mounted removable volume
+  adds a free-space segment (`· 7.5G SD` in the strip, `· SD 7.4/7.6 GB` in the panel) and appears
+  or disappears within one 3-second tick when a card is popped in or out. Volumes come from
+  `StorageManager`; no mount path is hardcoded.
 - Cold starts no longer drop the user's pins when the app list has not loaded yet.
 
 ### Fixed
